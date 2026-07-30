@@ -1,5 +1,6 @@
 import json
 from abc import ABC, abstractmethod
+from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any, Generic, Literal, TypeAlias, TypeVar
 
 from pydantic import BaseModel
@@ -56,29 +57,35 @@ class Resolver(ABC, Generic[EntityT, SourceT]):
     def add(self, entity: EntityT) -> EntityT:
         for existing in self._entities:
             if self._matches(existing, entity):
+                self._invalidate_derived_state()
                 merge = getattr(existing, "merge", None)
                 if callable(merge):
                     merge(entity)
                 return existing
 
+        self._invalidate_derived_state()
         self._entities.append(entity)
         return entity
 
-    def add_source(self, source: SourceT) -> list[EntityT]:
+    def _invalidate_derived_state(self) -> None:
+        """Invalidate cached outputs derived from the resolver's entities."""
+
+    def add_source(self, source: SourceT) -> tuple[EntityT, ...]:
         """Add all entities exposed by a resolver-specific source."""
 
+        self._invalidate_derived_state()
         self._source = source
         for entity in self.entities_from_source(source):
             self.add(entity)
         return self.entities
 
-    def resolve(self, source: SourceT) -> list[EntityT]:
+    def resolve(self, source: SourceT) -> tuple[EntityT, ...]:
         """Logically resolve entities from a source into this resolver."""
 
         return self.add_source(source)
 
     @abstractmethod
-    def entities_from_source(self, source: SourceT) -> list[EntityT]:
+    def entities_from_source(self, source: SourceT) -> Sequence[EntityT]:
         """Return entities from the source in observation order."""
 
     @abstractmethod
@@ -120,6 +127,7 @@ class Resolver(ABC, Generic[EntityT, SourceT]):
             labels,
             resolution,
         )
+        self._invalidate_derived_state()
         entities_by_label = dict(zip(labels, candidates, strict=True))
         for group in resolution.groups:
             canonical = entities_by_label[group.canonical_entity]
@@ -154,8 +162,7 @@ class Resolver(ABC, Generic[EntityT, SourceT]):
             "name": getattr(self._source, "name", None),
         }
         return (
-            "Source instruction metadata: "
-            f"{json.dumps(metadata, ensure_ascii=False)}."
+            f"Source instruction metadata: {json.dumps(metadata, ensure_ascii=False)}."
         )
 
     @staticmethod
@@ -165,26 +172,17 @@ class Resolver(ABC, Generic[EntityT, SourceT]):
     ) -> list[str]:
         input_labels = set(labels)
         resolved_labels = [
-            entity
-            for group in resolution.groups
-            for entity in group.entities
+            entity for group in resolution.groups for entity in group.entities
         ]
 
-        if (
-            len(resolved_labels) != len(labels)
-            or set(resolved_labels) != input_labels
-        ):
+        if len(resolved_labels) != len(labels) or set(resolved_labels) != input_labels:
             raise ValueError(
-                "The semantic resolution must contain every input entity "
-                "exactly once"
+                "The semantic resolution must contain every input entity exactly once"
             )
 
         canonical_by_entity: dict[str, str] = {}
         for group in resolution.groups:
-            if (
-                not group.entities
-                or group.canonical_entity not in group.entities
-            ):
+            if not group.entities or group.canonical_entity not in group.entities:
                 raise ValueError(
                     "Each semantic group must choose one of its entities as "
                     "the canonical entity"
@@ -193,9 +191,7 @@ class Resolver(ABC, Generic[EntityT, SourceT]):
                 canonical_by_entity[entity] = group.canonical_entity
 
         # Preserve the first-observed order of the semantic groups.
-        return list(
-            dict.fromkeys(canonical_by_entity[label] for label in labels)
-        )
+        return list(dict.fromkeys(canonical_by_entity[label] for label in labels))
 
     @staticmethod
     def _matches(existing: Any, entity: Any) -> bool:
@@ -205,8 +201,10 @@ class Resolver(ABC, Generic[EntityT, SourceT]):
         return bool(existing == entity)
 
     @property
-    def entities(self) -> list[EntityT]:
-        return self._entities
+    def entities(self) -> tuple[EntityT, ...]:
+        """Return a read-only view of the resolved collection."""
+
+        return tuple(self._entities)
 
 
 class ActorResolver(Resolver["ObservedActor", "Instruction"]):
@@ -219,12 +217,12 @@ class ActorResolver(Resolver["ObservedActor", "Instruction"]):
     def entities_from_source(
         self,
         instruction: "Instruction",
-    ) -> list["ObservedActor"]:
-        return [
+    ) -> tuple["ObservedActor", ...]:
+        return tuple(
             actor
             for segment_actors in instruction.actors.values()
             for actor in segment_actors
-        ]
+        )
 
     def semantic_label(self, actor: "ObservedActor") -> str:
         return actor.name
@@ -269,9 +267,8 @@ class ActorResolver(Resolver["ObservedActor", "Instruction"]):
         workers: list[Worker],
     ) -> list[Worker]:
         worker_names = [worker.name for worker in workers]
-        if (
-            len(worker_names) != len(actor_names)
-            or set(worker_names) != set(actor_names)
+        if len(worker_names) != len(actor_names) or set(worker_names) != set(
+            actor_names
         ):
             raise ValueError(
                 "Worker extraction must return every actor exactly once "
@@ -284,13 +281,13 @@ class ActorResolver(Resolver["ObservedActor", "Instruction"]):
     def add_instruction(
         self,
         instruction: "Instruction",
-    ) -> list["ObservedActor"]:
+    ) -> tuple["ObservedActor", ...]:
         """Backward-compatible alias for adding an instruction."""
 
         return self.add_source(instruction)
 
     @property
-    def actors(self) -> list["ObservedActor"]:
+    def actors(self) -> tuple["ObservedActor", ...]:
         """Actor-specific alias for the generic entity collection."""
 
         return self.entities
@@ -300,10 +297,11 @@ class ObjectResolver(Resolver["ObservedObject", "Instruction"]):
     """Resolve objects observed across an instruction's segments."""
 
     def __init__(self, instruction: "Instruction | None" = None):
-        self._entity_bindings: list[
-            tuple["ObservedObject", ObjectEntity]
-        ] = []
+        self._entity_bindings: tuple[tuple["ObservedObject", ObjectEntity], ...] = ()
         super().__init__(instruction)
+
+    def _invalidate_derived_state(self) -> None:
+        self._entity_bindings = ()
 
     @property
     def entity_kind(self) -> str:
@@ -312,34 +310,32 @@ class ObjectResolver(Resolver["ObservedObject", "Instruction"]):
     def entities_from_source(
         self,
         instruction: "Instruction",
-    ) -> list["ObservedObject"]:
-        return [
+    ) -> tuple["ObservedObject", ...]:
+        return tuple(
             observed_object
             for segment_objects in instruction.objects.values()
             for observed_object in segment_objects
-        ]
+        )
 
     def semantic_label(self, observed_object: "ObservedObject") -> str:
-        return (
-            f"name={observed_object.name!r}, "
-            f"type={observed_object.object_type!r}"
-        )
+        return f"name={observed_object.name!r}, type={observed_object.object_type!r}"
 
     def create_entities(
         self,
-        objects: list["ObservedObject"] | None = None,
+        objects: Sequence["ObservedObject"] | None = None,
         *,
         extractor: Extractor | None = None,
     ) -> list[ObjectEntity]:
         """Classify resolved objects as Tool, Material, or PPE entities."""
 
         candidates = objects if objects is not None else self.objects
-        labels = [self.semantic_label(observed_object) for observed_object in candidates]
+        labels = [
+            self.semantic_label(observed_object) for observed_object in candidates
+        ]
         if len(labels) != len(set(labels)):
-            raise ValueError(
-                "Objects must be de-duplicated before creating entities"
-            )
+            raise ValueError("Objects must be de-duplicated before creating entities")
         if not candidates:
+            self._entity_bindings = ()
             return []
 
         entity_extractor = extractor or Extractor()
@@ -353,9 +349,7 @@ class ObjectResolver(Resolver["ObservedObject", "Instruction"]):
             labels,
             classified_objects,
         )
-        self._entity_bindings = list(
-            zip(candidates, entities, strict=True)
-        )
+        self._entity_bindings = tuple(zip(candidates, entities, strict=True))
         return entities
 
     def _object_entity_creation_prompt(self) -> str:
@@ -412,22 +406,20 @@ class ObjectResolver(Resolver["ObservedObject", "Instruction"]):
         for observed_object, label in zip(objects, labels, strict=True):
             entity = result_by_label[label]
             if entity.name != observed_object.name:
-                raise ValueError(
-                    "Object entity extraction must preserve object names"
-                )
+                raise ValueError("Object entity extraction must preserve object names")
             entities.append(entity)
         return entities
 
     def add_instruction(
         self,
         instruction: "Instruction",
-    ) -> list["ObservedObject"]:
+    ) -> tuple["ObservedObject", ...]:
         """Convenience alias for adding an instruction."""
 
         return self.add_source(instruction)
 
     @property
-    def objects(self) -> list["ObservedObject"]:
+    def objects(self) -> tuple["ObservedObject", ...]:
         """Object-specific alias for the generic entity collection."""
 
         return self.entities
@@ -435,7 +427,7 @@ class ObjectResolver(Resolver["ObservedObject", "Instruction"]):
     @property
     def entity_bindings(
         self,
-    ) -> list[tuple["ObservedObject", ObjectEntity]]:
+    ) -> tuple[tuple["ObservedObject", ObjectEntity], ...]:
         """Created entities paired with their reference-bearing observations."""
 
         return self._entity_bindings

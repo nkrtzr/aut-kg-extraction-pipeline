@@ -35,13 +35,14 @@ An action contains:
 
 - `id`
 - start and end timestamps
-- actor name
+- an `actor_id` reference
 - action name
-- optional object, instrument, and target names
+- optional `object_id`, `instrument_id`, and `target_id` references
 
 ### `ObservedActor` and `ObservedObject`
 
-Both observation types contain an ordered `action_ids` list recording every
+Both observation types have their own typed `id` and contain an ordered
+`action_ids` list recording every
 action in which the observation occurs.
 
 - Actors match by name.
@@ -52,15 +53,16 @@ action in which the observation occurs.
 ### `Instruction`
 
 An instruction contains `id`, `name`, and ordered segments. During
-initialization it builds:
+initialization it validates globally unique segment, action, actor, and object
+IDs and rejects actor/object endpoints that do not resolve within the action's
+segment. It then builds a read-only `reference_index` containing:
 
-- `actors: dict[segment_id, list[ObservedActor]]`
-- `objects: dict[segment_id, list[ObservedObject]]`
+- entities by their typed IDs;
+- ordered reverse actor-to-action and object-to-action references.
 
-Actor references are derived from `ObservedAction.actor`. Object references
-are derived from the `object`, `instrument`, and `target` fields. The helper
-`extract_actors()` returns actors deduplicated across the complete instruction
-with their action references merged.
+The compatibility `actors` and `objects` views are read-only per-segment
+mappings. The helper `extract_actors()` returns actors deduplicated across the
+complete instruction with their action references merged.
 
 `VideoSegment` still numbers repeated actor and object names in observation
 order.
@@ -80,6 +82,10 @@ File: `backend/extraction/resolver.py`
 - validating that the LLM neither drops nor invents labels;
 - retaining the first-observed order;
 - adding instruction ID and name metadata to LLM prompts.
+
+Resolver entity collections are exposed as tuples. Derived object/entity
+bindings are invalidated whenever entities or sources change, and bindings are
+also exposed as tuples so consumers cannot mutate the cached collection.
 
 Semantic deduplication also merges the action references of entities placed in
 the same semantic group.
@@ -210,7 +216,5 @@ and relation construction without requiring a running LLM.
 - Process parameters can currently be attached directly only to
   `ToolRequirement`, because the material and PPE requirement schemas have no
   parameter field.
-- Duplicate action IDs across segments are not explicitly rejected by
-  `Sequencer`; `steps_by_action_id` would retain only one mapping.
 - Several current implementation and test files are untracked in Git and need
   to be added before committing.

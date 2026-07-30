@@ -1,34 +1,43 @@
 """Schemas for observations extracted from text and video segments."""
 
 from collections import Counter
+from dataclasses import dataclass
+from types import MappingProxyType
+from typing import Mapping, NewType
 
 from pydantic import BaseModel, Field, model_validator
+
+ActionId = NewType("ActionId", str)
+ActorId = NewType("ActorId", str)
+ObjectId = NewType("ObjectId", str)
+SegmentId = NewType("SegmentId", str)
 
 
 class ObservedAction(BaseModel):
     """An action observed during a bounded time interval.
 
-    Actor and entity references are stored as names matching the corresponding
-    observed actors and objects.
+    Actor and entity references use typed observation IDs. Display names are
+    never used as foreign keys.
     """
 
-    id: str
+    id: ActionId
     start_time_ms: int
     end_time_ms: int
 
-    actor: str
+    actor_id: ActorId
     action: str
-    object: str | None = None
-    instrument: str | None = None
-    target: str | None = None
+    object_id: ObjectId | None = None
+    instrument_id: ObjectId | None = None
+    target_id: ObjectId | None = None
 
 
 class ObservedObject(BaseModel):
     """An object observed in a segment."""
 
+    id: ObjectId
     name: str
     object_type: str
-    action_ids: list[str] = Field(default_factory=list)
+    action_ids: list[ActionId] = Field(default_factory=list)
 
     def matches(self, other: object) -> bool:
         """Match objects by their observed name and type."""
@@ -42,16 +51,15 @@ class ObservedObject(BaseModel):
     def merge(self, other: "ObservedObject") -> None:
         """Merge action references while preserving observation order."""
 
-        self.action_ids = list(
-            dict.fromkeys([*self.action_ids, *other.action_ids])
-        )
+        self.action_ids = list(dict.fromkeys([*self.action_ids, *other.action_ids]))
 
 
 class ObservedActor(BaseModel):
     """An actor observed in a video segment."""
 
+    id: ActorId
     name: str
-    action_ids: list[str] = Field(default_factory=list)
+    action_ids: list[ActionId] = Field(default_factory=list)
 
     def matches(self, other: object) -> bool:
         """Match actors by their observed name."""
@@ -61,17 +69,16 @@ class ObservedActor(BaseModel):
     def merge(self, other: "ObservedActor") -> None:
         """Merge action references while preserving observation order."""
 
-        self.action_ids = list(
-            dict.fromkeys([*self.action_ids, *other.action_ids])
-        )
+        self.action_ids = list(dict.fromkeys([*self.action_ids, *other.action_ids]))
 
 
 class Segment(BaseModel):
     """A text-derived segment containing observations to be processed."""
 
-    id: str
+    id: SegmentId
     scene: str
     actions: list[ObservedAction]
+    actors: list[ObservedActor]
     objects: list[ObservedObject]
     uncertainties: list[str]
 
@@ -96,50 +103,9 @@ class VideoSegment(Segment):
     def number_repeated_entities(self) -> "VideoSegment":
         """Number repeated object and actor names in their observation order."""
 
-        self._reject_ambiguous_action_references()
         self._number_repeated_names(self.objects)
         self._number_repeated_names(self.actors)
         return self
-
-    def _reject_ambiguous_action_references(self) -> None:
-        """Reject action labels that match more than one observed entity."""
-
-        repeated_object_names = {
-            name
-            for name, count in Counter(
-                observed_object.name for observed_object in self.objects
-            ).items()
-            if count > 1
-        }
-        object_references = {
-            reference
-            for action in self.actions
-            for reference in (action.object, action.instrument, action.target)
-            if reference is not None
-        }
-        ambiguous_objects = repeated_object_names & object_references
-        if ambiguous_objects:
-            names = ", ".join(sorted(repr(name) for name in ambiguous_objects))
-            raise ValueError(
-                "Action object references are ambiguous for repeated "
-                f"observation names: {names}. Assign unique names before "
-                "creating the VideoSegment."
-            )
-
-        repeated_actor_names = {
-            name
-            for name, count in Counter(actor.name for actor in self.actors).items()
-            if count > 1
-        }
-        actor_references = {action.actor for action in self.actions}
-        ambiguous_actors = repeated_actor_names & actor_references
-        if ambiguous_actors:
-            names = ", ".join(sorted(repr(name) for name in ambiguous_actors))
-            raise ValueError(
-                "Action actor references are ambiguous for repeated observation "
-                f"names: {names}. Assign unique names before creating the "
-                "VideoSegment."
-            )
 
     @staticmethod
     def _number_repeated_names(
@@ -157,12 +123,23 @@ class VideoSegment(Segment):
                 entity.name = f"{original_name}_{next_number[original_name]}"
 
 
+@dataclass(frozen=True)
+class InstructionReferenceIndex:
+    """Read-only instruction-wide identity and reverse-reference indexes."""
+
+    segments_by_id: Mapping[SegmentId, Segment]
+    actions_by_id: Mapping[ActionId, ObservedAction]
+    actors_by_id: Mapping[ActorId, ObservedActor]
+    objects_by_id: Mapping[ObjectId, ObservedObject]
+    actor_action_ids: Mapping[ActorId, tuple[ActionId, ...]]
+    object_action_ids: Mapping[ObjectId, tuple[ActionId, ...]]
+
+
 class Instruction:
     """A collection of segments with observations indexed by segment ID.
 
-    Objects are taken directly from each segment. Actors are derived from the
-    actor references in its actions and de-duplicated while retaining their
-    first-observed order.
+    The instruction owns a validated, read-only reference index. Every action
+    endpoint must resolve to an actor or object declared in the same segment.
     """
 
     def __init__(
@@ -173,42 +150,121 @@ class Instruction:
     ):
         """Initialize an instruction and build its per-segment lookup maps."""
 
-        self._validate_reference_ids(segments)
         self.id = id
         self.name = name
         self.segments = segments
-        self.objects: dict[str, list[ObservedObject]] = {}
-        self.actors: dict[str, list[ObservedActor]] = {}
-        for segment in segments:
-            self._add_object_references(segment)
-            self.objects[segment.id] = segment.objects
-            self.actors[segment.id] = self._actors_from_segment(segment)
+        self.reference_index = self._build_reference_index(segments)
+        self.objects = MappingProxyType(
+            {segment.id: tuple(segment.objects) for segment in segments}
+        )
+        self.actors = MappingProxyType(
+            {segment.id: tuple(segment.actors) for segment in segments}
+        )
 
     @staticmethod
-    def _validate_reference_ids(segments: list[Segment]) -> None:
-        """Ensure every ID used as an instruction-wide lookup key is unique."""
+    def _duplicates(values: list[str]) -> list[str]:
+        return sorted(value for value, count in Counter(values).items() if count > 1)
 
-        segment_counts = Counter(segment.id for segment in segments)
-        duplicate_segment_ids = sorted(
-            segment_id for segment_id, count in segment_counts.items() if count > 1
-        )
-        if duplicate_segment_ids:
-            raise ValueError(
-                "Instruction segment IDs must be unique; duplicates: "
-                f"{duplicate_segment_ids!r}"
+    @classmethod
+    def _build_reference_index(
+        cls,
+        segments: list[Segment],
+    ) -> InstructionReferenceIndex:
+        """Validate identities and endpoints, then build all reference maps."""
+
+        duplicate_ids = {
+            "segment": cls._duplicates([segment.id for segment in segments]),
+            "action": cls._duplicates(
+                [action.id for segment in segments for action in segment.actions]
+            ),
+            "actor": cls._duplicates(
+                [actor.id for segment in segments for actor in segment.actors]
+            ),
+            "object": cls._duplicates(
+                [
+                    observed_object.id
+                    for segment in segments
+                    for observed_object in segment.objects
+                ]
+            ),
+        }
+        for kind, duplicates in duplicate_ids.items():
+            if duplicates:
+                scope = "globally " if kind != "segment" else ""
+                raise ValueError(
+                    f"Instruction {kind} IDs must be {scope}unique; "
+                    f"duplicates: {duplicates!r}"
+                )
+
+        segments_by_id = {segment.id: segment for segment in segments}
+        actions_by_id: dict[ActionId, ObservedAction] = {}
+        actors_by_id: dict[ActorId, ObservedActor] = {}
+        objects_by_id: dict[ObjectId, ObservedObject] = {}
+        actor_action_ids: dict[ActorId, list[ActionId]] = {}
+        object_action_ids: dict[ObjectId, list[ActionId]] = {}
+
+        for segment in segments:
+            segment_actor_ids = {actor.id for actor in segment.actors}
+            segment_object_ids = {
+                observed_object.id for observed_object in segment.objects
+            }
+            actors_by_id.update((actor.id, actor) for actor in segment.actors)
+            objects_by_id.update(
+                (observed_object.id, observed_object)
+                for observed_object in segment.objects
+            )
+            actor_action_ids.update((actor.id, []) for actor in segment.actors)
+            object_action_ids.update(
+                (observed_object.id, []) for observed_object in segment.objects
             )
 
-        action_counts = Counter(
-            action.id for segment in segments for action in segment.actions
+            for action in segment.actions:
+                if action.actor_id not in segment_actor_ids:
+                    raise ValueError(
+                        f"Action {action.id!r} references unknown actor "
+                        f"{action.actor_id!r} in segment {segment.id!r}"
+                    )
+                object_refs = (
+                    action.object_id,
+                    action.instrument_id,
+                    action.target_id,
+                )
+                unknown_object_ids = sorted(
+                    {
+                        object_id
+                        for object_id in object_refs
+                        if object_id is not None and object_id not in segment_object_ids
+                    }
+                )
+                if unknown_object_ids:
+                    raise ValueError(
+                        f"Action {action.id!r} references unknown objects "
+                        f"{unknown_object_ids!r} in segment {segment.id!r}"
+                    )
+
+                actions_by_id[action.id] = action
+                actor_action_ids[action.actor_id].append(action.id)
+                for object_id in dict.fromkeys(object_refs):
+                    if object_id is not None:
+                        object_action_ids[object_id].append(action.id)
+
+        for actor_id, actor in actors_by_id.items():
+            actor.action_ids = list(actor_action_ids.get(actor_id, ()))
+        for object_id, observed_object in objects_by_id.items():
+            observed_object.action_ids = list(object_action_ids.get(object_id, ()))
+
+        return InstructionReferenceIndex(
+            segments_by_id=MappingProxyType(segments_by_id),
+            actions_by_id=MappingProxyType(actions_by_id),
+            actors_by_id=MappingProxyType(actors_by_id),
+            objects_by_id=MappingProxyType(objects_by_id),
+            actor_action_ids=MappingProxyType(
+                {key: tuple(value) for key, value in actor_action_ids.items()}
+            ),
+            object_action_ids=MappingProxyType(
+                {key: tuple(value) for key, value in object_action_ids.items()}
+            ),
         )
-        duplicate_action_ids = sorted(
-            action_id for action_id, count in action_counts.items() if count > 1
-        )
-        if duplicate_action_ids:
-            raise ValueError(
-                "Instruction action IDs must be globally unique; duplicates: "
-                f"{duplicate_action_ids!r}"
-            )
 
     def extract_actors(self) -> list[ObservedActor]:
         """Extract a de-duplicated list of actors across all segments."""
@@ -222,31 +278,3 @@ class Instruction:
                 else:
                     existing.merge(actor)
         return list(actors_by_name.values())
-
-    @staticmethod
-    def _actors_from_segment(segment: Segment) -> list[ObservedActor]:
-        actors_by_name: dict[str, ObservedActor] = {}
-        for action in segment.actions:
-            actor = actors_by_name.setdefault(
-                action.actor,
-                ObservedActor(name=action.actor),
-            )
-            if action.id not in actor.action_ids:
-                actor.action_ids.append(action.id)
-        return list(actors_by_name.values())
-
-    @staticmethod
-    def _add_object_references(segment: Segment) -> None:
-        for observed_object in segment.objects:
-            referenced_ids = [
-                action.id
-                for action in segment.actions
-                if observed_object.name
-                in (action.object, action.instrument, action.target)
-            ]
-            observed_object.action_ids = list(
-                dict.fromkeys([
-                    *observed_object.action_ids,
-                    *referenced_ids,
-                ])
-            )

@@ -3,6 +3,7 @@ from backend.schemas.process_knowledge.entities import Procedure
 from backend.schemas.process_knowledge.text import (
     Instruction,
     ObservedAction,
+    ObservedActor,
     Segment,
 )
 
@@ -12,7 +13,7 @@ def make_action(action_id: str, name: str) -> ObservedAction:
         id=action_id,
         start_time_ms=0,
         end_time_ms=1000,
-        actor="operator",
+        actor_id=f"{action_id}-operator",
         action=name,
     )
 
@@ -25,6 +26,9 @@ def make_segment(
         id=segment_id,
         scene="workbench",
         actions=actions,
+        actors=[
+            ObservedActor(id=action.actor_id, name="operator") for action in actions
+        ],
         objects=[],
         uncertainties=[],
     )

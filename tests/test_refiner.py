@@ -14,6 +14,7 @@ from backend.schemas.process_knowledge.entities import (
 from backend.schemas.process_knowledge.text import (
     Instruction,
     ObservedAction,
+    ObservedActor,
     ObservedObject,
     Segment,
 )
@@ -48,27 +49,34 @@ def test_refiner_links_entities_to_steps_by_action_reference() -> None:
                         id="action-1",
                         start_time_ms=0,
                         end_time_ms=1000,
-                        actor="operator",
+                        actor_id="operator-1",
                         action="Put on safety glasses",
-                        object="safety glasses",
+                        object_id="glasses-1",
                     ),
                     ObservedAction(
                         id="action-2",
                         start_time_ms=1000,
                         end_time_ms=2000,
-                        actor="operator",
+                        actor_id="operator-1",
                         action="Fasten the plate",
-                        object="steel plate",
-                        instrument="hammer",
+                        object_id="plate-1",
+                        instrument_id="hammer-1",
                     ),
                 ],
+                actors=[ObservedActor(id="operator-1", name="operator")],
                 objects=[
-                    ObservedObject(name="hammer", object_type="tool"),
                     ObservedObject(
+                        id="hammer-1",
+                        name="hammer",
+                        object_type="tool",
+                    ),
+                    ObservedObject(
+                        id="plate-1",
                         name="steel plate",
                         object_type="material",
                     ),
                     ObservedObject(
+                        id="glasses-1",
                         name="safety glasses",
                         object_type="ppe",
                     ),
@@ -81,23 +89,25 @@ def test_refiner_links_entities_to_steps_by_action_reference() -> None:
     resolver = ObjectResolver(instruction)
     labels = [resolver.semantic_label(obj) for obj in resolver.objects]
     resolver.create_entities(
-        extractor=FakeExtractor([
-            ClassifiedObject(
-                input_label=labels[0],
-                entity_type="tool",
-                tool=Tool(name="hammer"),
-            ),
-            ClassifiedObject(
-                input_label=labels[1],
-                entity_type="material",
-                material=Material(name="steel plate"),
-            ),
-            ClassifiedObject(
-                input_label=labels[2],
-                entity_type="ppe",
-                ppe=PPE(name="safety glasses"),
-            ),
-        ]),
+        extractor=FakeExtractor(
+            [
+                ClassifiedObject(
+                    input_label=labels[0],
+                    entity_type="tool",
+                    tool=Tool(name="hammer"),
+                ),
+                ClassifiedObject(
+                    input_label=labels[1],
+                    entity_type="material",
+                    material=Material(name="steel plate"),
+                ),
+                ClassifiedObject(
+                    input_label=labels[2],
+                    entity_type="ppe",
+                    ppe=PPE(name="safety glasses"),
+                ),
+            ]
+        ),
     )
 
     process_parameter = ProcessParameter(
@@ -109,14 +119,18 @@ def test_refiner_links_entities_to_steps_by_action_reference() -> None:
     refiner = Refiner(
         sequencer,
         resolver,
-        extractor=FakeExtractor(segment_refinements=[
-            SegmentLevelThreeEntities(actions=[
-                ActionLevelThreeEntities(
-                    action_id="action-2",
-                    process_parameters=[process_parameter],
+        extractor=FakeExtractor(
+            segment_refinements=[
+                SegmentLevelThreeEntities(
+                    actions=[
+                        ActionLevelThreeEntities(
+                            action_id="action-2",
+                            process_parameters=[process_parameter],
+                        ),
+                    ]
                 ),
-            ]),
-        ]),
+            ]
+        ),
     )
 
     assert len(refiner.relations) == 3
@@ -143,12 +157,19 @@ def test_refiner_requires_created_object_entities() -> None:
                         id="action-1",
                         start_time_ms=0,
                         end_time_ms=1000,
-                        actor="operator",
+                        actor_id="operator-1",
                         action="Strike",
-                        instrument="hammer",
+                        instrument_id="hammer-1",
                     ),
                 ],
-                objects=[ObservedObject(name="hammer", object_type="tool")],
+                actors=[ObservedActor(id="operator-1", name="operator")],
+                objects=[
+                    ObservedObject(
+                        id="hammer-1",
+                        name="hammer",
+                        object_type="tool",
+                    )
+                ],
                 uncertainties=[],
             ),
         ],

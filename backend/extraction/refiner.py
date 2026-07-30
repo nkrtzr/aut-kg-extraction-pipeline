@@ -1,5 +1,7 @@
 """Create step-level requirements from resolved instruction objects."""
 
+from collections.abc import Sequence
+
 from pydantic import BaseModel, Field
 
 from backend.extraction.extractor import Extractor
@@ -65,7 +67,7 @@ class Refiner:
 
     def _create_relations(
         self,
-        bindings: list[tuple[object, ObjectEntity]],
+        bindings: Sequence[tuple[object, ObjectEntity]],
     ) -> None:
         if not bindings and self.object_resolver.objects:
             raise ValueError(
@@ -78,9 +80,7 @@ class Refiner:
             for action_id in action_ids:
                 step = self.sequencer.steps_by_action_id.get(action_id)
                 if step is None:
-                    raise ValueError(
-                        f"Object references unknown action {action_id!r}"
-                    )
+                    raise ValueError(f"Object references unknown action {action_id!r}")
 
                 relation = self._requirement_for(step, entity)
                 self.relations.append(relation)
@@ -138,13 +138,10 @@ class Refiner:
     ) -> None:
         valid_action_ids = {action.id for action in segment.actions}
         returned_action_ids = [
-            action_entities.action_id
-            for action_entities in refinement.actions
+            action_entities.action_id for action_entities in refinement.actions
         ]
         if len(returned_action_ids) != len(set(returned_action_ids)):
-            raise ValueError(
-                "Segment refinement returned a duplicate action ID"
-            )
+            raise ValueError("Segment refinement returned a duplicate action ID")
         if not set(returned_action_ids).issubset(valid_action_ids):
             raise ValueError(
                 "Segment refinement returned an action ID outside its segment"
