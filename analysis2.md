@@ -232,6 +232,12 @@ stages remain available for focused testing and advanced use, but callers no
 longer need to invoke them in the correct order or transfer their results into
 the graph manually.
 
+The returned graph is automatically populated with every output currently
+produced by those stages: `Worker`, `Tool`, `Material`, `PPE`, `Procedure`,
+`Step`, and `ProcessParameter` entities, plus `StepOrder`, `ToolRequirement`,
+`MaterialRequirement`, and `PPERequirement` relations. `ProcedureHasStep` is
+not yet generated and remains the next graph-completeness task.
+
 The LLM calls require the configured Ollama service unless an `Extractor`
 replacement is injected for testing.
 
@@ -243,7 +249,8 @@ Focused verification currently passes:
 - 4 tests for graph assembly, reference validation, cascade removal, and
   restricted removal;
 - 1 test for assembling completed extraction outputs through `from_results()`;
-- 1 end-to-end façade test covering resolution through graph assembly;
+- 1 end-to-end façade test confirming that all currently produced entity and
+  relation categories reach the assembled graph;
 - Ruff checks for the changed implementation and test files.
 
 The tests use injected fake extractors, so they verify prompts, structured

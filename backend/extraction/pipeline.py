@@ -15,7 +15,12 @@ class KnowledgeGraphExtractionPipeline:
         self.extractor = extractor or Extractor()
 
     def extract(self, instruction: Instruction) -> ProceduralKnowledgeGraph:
-        """Extract and assemble one editable procedural knowledge graph."""
+        """Extract and assemble one complete editable specification graph.
+
+        The returned graph contains every entity and relation currently
+        produced by the actor resolver, object resolver, sequencer, and
+        refiner. Callers do not need to transfer stage outputs manually.
+        """
 
         actor_resolver = ActorResolver(instruction)
         actors = actor_resolver.semantic_deduplicate(extractor=self.extractor)

@@ -2,10 +2,19 @@ import json
 from typing import Any
 
 from backend.extraction.pipeline import KnowledgeGraphExtractionPipeline
-from backend.extraction.refiner import SegmentLevelThreeEntities
+from backend.extraction.refiner import (
+    ActionLevelThreeEntities,
+    SegmentLevelThreeEntities,
+)
 from backend.extraction.resolver import ClassifiedObject, SemanticResolution
-from backend.schemas.process_knowledge.entities import PPE, Worker
-from backend.schemas.process_knowledge.relations import PPERequirement
+from backend.schemas.process_knowledge.entities import (
+    PPE,
+    Procedure,
+    ProcessParameter,
+    Step,
+    Worker,
+)
+from backend.schemas.process_knowledge.relations import PPERequirement, StepOrder
 from backend.schemas.process_knowledge.text import (
     Instruction,
     ObservedAction,
@@ -29,7 +38,21 @@ class PipelineExtractor:
                 }
             )
         assert response_model is SegmentLevelThreeEntities
-        return SegmentLevelThreeEntities()
+        return SegmentLevelThreeEntities(
+            actions=[
+                ActionLevelThreeEntities(
+                    action_id="action-1",
+                    process_parameters=[
+                        ProcessParameter(
+                            name="Inspection distance",
+                            parameter_type="distance",
+                            unit="cm",
+                            nominal_value=20,
+                        )
+                    ],
+                )
+            ]
+        )
 
     def extract_list(self, **kwargs: Any) -> list[Any]:
         item_model = kwargs["item_model"]
@@ -68,7 +91,15 @@ def test_pipeline_extracts_complete_editable_graph() -> None:
                         actor_id=actor.id,
                         action="Inspect the assembly",
                         instrument_id=glasses.id,
-                    )
+                    ),
+                    ObservedAction(
+                        id="action-2",
+                        start_time_ms=1000,
+                        end_time_ms=2000,
+                        actor_id=actor.id,
+                        action="Document the result",
+                        instrument_id=glasses.id,
+                    ),
                 ],
                 actors=[actor],
                 objects=[glasses],
@@ -83,7 +114,17 @@ def test_pipeline_extracts_complete_editable_graph() -> None:
 
     assert graph.procedure is not None
     assert graph.procedure.procedure_id == "instruction-1"
-    assert tuple(graph.steps_by_action_id) == ("action-1",)
-    assert any(isinstance(entity, Worker) for entity in graph.entities)
-    assert any(isinstance(relation, PPERequirement) for relation in graph.relations)
+    assert tuple(graph.steps_by_action_id) == ("action-1", "action-2")
+    assert sum(isinstance(entity, Procedure) for entity in graph.entities) == 1
+    assert sum(isinstance(entity, Step) for entity in graph.entities) == 2
+    assert sum(isinstance(entity, Worker) for entity in graph.entities) == 1
+    assert sum(isinstance(entity, PPE) for entity in graph.entities) == 1
+    assert sum(
+        isinstance(entity, ProcessParameter) for entity in graph.entities
+    ) == 1
+    assert sum(
+        isinstance(relation, PPERequirement) for relation in graph.relations
+    ) == 2
+    assert sum(isinstance(relation, StepOrder) for relation in graph.relations) == 1
+    assert tuple(graph.process_parameters_by_action_id) == ("action-1",)
     graph.validate()
