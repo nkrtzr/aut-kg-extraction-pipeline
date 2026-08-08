@@ -35,13 +35,14 @@ An action contains:
 
 - `id`
 - start and end timestamps
-- actor name
+- an `actor_id` reference
 - action name
-- optional object, instrument, and target names
+- optional `object_id`, `instrument_id`, and `target_id` references
 
 ### `ObservedActor` and `ObservedObject`
 
-Both observation types contain an ordered `action_ids` list recording every
+Both observation types have their own typed `id` and contain an ordered
+`action_ids` list recording every
 action in which the observation occurs.
 
 - Actors match by name.
@@ -52,15 +53,16 @@ action in which the observation occurs.
 ### `Instruction`
 
 An instruction contains `id`, `name`, and ordered segments. During
-initialization it builds:
+initialization it validates globally unique segment, action, actor, and object
+IDs and rejects actor/object endpoints that do not resolve within the action's
+segment. It then builds a read-only `reference_index` containing:
 
-- `actors: dict[segment_id, list[ObservedActor]]`
-- `objects: dict[segment_id, list[ObservedObject]]`
+- entities by their typed IDs;
+- ordered reverse actor-to-action and object-to-action references.
 
-Actor references are derived from `ObservedAction.actor`. Object references
-are derived from the `object`, `instrument`, and `target` fields. The helper
-`extract_actors()` returns actors deduplicated across the complete instruction
-with their action references merged.
+The compatibility `actors` and `objects` views are read-only per-segment
+mappings. The helper `extract_actors()` returns actors deduplicated across the
+complete instruction with their action references merged.
 
 `VideoSegment` still numbers repeated actor and object names in observation
 order.
@@ -81,6 +83,11 @@ File: `backend/extraction/resolver.py`
 - retaining the first-observed order;
 - adding instruction ID and name metadata to LLM prompts.
 
+Resolver entity collections are exposed as tuples. Derived actor/worker and
+object/entity bindings are invalidated whenever entities or sources change,
+and bindings are also exposed as tuples so consumers cannot mutate the cached
+collection.
+
 Semantic deduplication also merges the action references of entities placed in
 the same semantic group.
 
@@ -92,11 +99,15 @@ Important outputs and methods:
 
 - `actors`: logically deduplicated actors;
 - `semantic_deduplicate()`: LLM-assisted actor identity resolution;
-- `create_workers()`: creates one `Worker` per resolved actor.
+- `create_workers()`: creates one `Worker` per resolved actor;
+- `worker_bindings`: pairs each created worker with its reference-bearing
+  `ObservedActor`.
 
 Worker extraction preserves exact actor names and order. Optional fields such
 as `role` are requested only when supported by the actor name. The response is
 rejected if a worker is missing, duplicated, invented, or renamed.
+The retained bindings preserve `ObservedActor.action_ids`, allowing a later
+execution stage to resolve each observed action to its worker.
 
 ### `ObjectResolver`
 
@@ -170,20 +181,50 @@ The refiner rejects:
 - duplicate action IDs in one LLM refinement response;
 - action IDs outside the segment being analyzed.
 
+## Procedural knowledge graph aggregate
+
+File: `backend/schemas/process_knowledge/pkg.py`
+
+`ProceduralKnowledgeGraph` is the canonical in-memory aggregate for entities,
+relations, and the indexes needed to edit one extracted procedure safely. It
+can be populated incrementally by pipeline stages through controlled methods
+for adding a procedure, steps, general entities and relations, and action-bound
+process parameters. Its public entity, relation, step, and ordering collections
+are exposed as tuples.
+
+Source action IDs are used as stable step identifiers because step numbers are
+positional and therefore change when a step is removed. Relation insertion
+checks that every referenced `KGEntity` is already registered in the graph.
+
+`remove_step(action_id, dependent_policy=...)` supports two policies:
+
+- `cascade` removes relations and process parameters that depend on the step;
+- `restrict` refuses removal while such dependents exist.
+
+After removal, the aggregate renumbers all remaining steps contiguously and
+rebuilds `StepOrder` from the ordered action-to-step index. This bridges the
+removed step's predecessor and successor without leaving stale order edges.
+The graph's `validate()` method checks entity membership, step numbering,
+adjacent ordering, and relation endpoints.
+
+The aggregate remains independent of extraction classes so it can also be used
+for manual editing and by later post-processing stages.
+
 ## Typical pipeline usage
 
 ```python
-actor_resolver = ActorResolver(instruction)
-actors = actor_resolver.semantic_deduplicate()
-workers = actor_resolver.create_workers(actors)
-
-object_resolver = ObjectResolver(instruction)
-objects = object_resolver.semantic_deduplicate()
-physical_entities = object_resolver.create_entities(objects)
-
-sequencer = Sequencer(instruction)
-refiner = Refiner(sequencer, object_resolver)
+pipeline = KnowledgeGraphExtractionPipeline()
+graph = pipeline.extract(instruction)
 ```
+
+File: `backend/extraction/pipeline.py`
+
+`KnowledgeGraphExtractionPipeline` is the public façade for the complete
+procedure-specification workflow. It coordinates actor and object resolution,
+sequencing, refinement, graph assembly, and final graph validation. Individual
+stages remain available for focused testing and advanced use, but callers no
+longer need to invoke them in the correct order or transfer their results into
+the graph manually.
 
 The LLM calls require the configured Ollama service unless an `Extractor`
 replacement is injected for testing.
@@ -193,6 +234,9 @@ replacement is injected for testing.
 Focused verification currently passes:
 
 - 19 tests across resolver, sequencer, refiner, and text-schema behavior;
+- 4 tests for graph assembly, reference validation, cascade removal, and
+  restricted removal;
+- 1 end-to-end façade test covering resolution through graph assembly;
 - Ruff checks for the changed implementation and test files.
 
 The tests use injected fake extractors, so they verify prompts, structured
@@ -201,8 +245,7 @@ and relation construction without requiring a running LLM.
 
 ## Current limitations and follow-up work
 
-- The pipeline is in-memory and has no graph persistence layer.
-- No top-level orchestrator currently runs all stages as one operation.
+- The graph aggregate is in-memory and has no persistence adapter yet.
 - The LLM-dependent production path is not covered by an Ollama integration
   test.
 - Semantic matching relies on labels and instruction metadata rather than the
@@ -210,7 +253,5 @@ and relation construction without requiring a running LLM.
 - Process parameters can currently be attached directly only to
   `ToolRequirement`, because the material and PPE requirement schemas have no
   parameter field.
-- Duplicate action IDs across segments are not explicitly rejected by
-  `Sequencer`; `steps_by_action_id` would retain only one mapping.
 - Several current implementation and test files are untracked in Git and need
   to be added before committing.
