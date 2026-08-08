@@ -137,6 +137,7 @@ procedure sequence:
 - creates one globally numbered `Step` per action;
 - retains the serialized action in `Step.source_text`;
 - creates `steps_by_action_id`;
+- creates one `ProcedureHasStep` relation for every generated step;
 - creates a `StepOrder` between every adjacent pair of steps.
 
 An instruction without actions produces empty step and ordering collections.
@@ -235,8 +236,7 @@ the graph manually.
 The returned graph is automatically populated with every output currently
 produced by those stages: `Worker`, `Tool`, `Material`, `PPE`, `Procedure`,
 `Step`, and `ProcessParameter` entities, plus `StepOrder`, `ToolRequirement`,
-`MaterialRequirement`, and `PPERequirement` relations. `ProcedureHasStep` is
-not yet generated and remains the next graph-completeness task.
+`MaterialRequirement`, `PPERequirement`, and `ProcedureHasStep` relations.
 
 The LLM calls require the configured Ollama service unless an `Extractor`
 replacement is injected for testing.

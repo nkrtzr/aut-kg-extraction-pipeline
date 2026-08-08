@@ -47,5 +47,5 @@ class KnowledgeGraphExtractionPipeline:
             process_parameters_by_action_id=(
                 refiner.process_parameters_by_action_id
             ),
-            relations=refiner.relations,
+            relations=[*sequencer.procedure_has_steps, *refiner.relations],
         )

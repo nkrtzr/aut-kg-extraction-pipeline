@@ -11,7 +11,7 @@ from backend.schemas.process_knowledge.entities import (
     ProcessParameter,
     Step,
 )
-from backend.schemas.process_knowledge.relations import StepOrder
+from backend.schemas.process_knowledge.relations import ProcedureHasStep, StepOrder
 from backend.schemas.process_knowledge.text import ActionId
 
 
@@ -91,6 +91,16 @@ class ProceduralKnowledgeGraph:
             relation
             for relation in self._relations
             if isinstance(relation, StepOrder)
+        )
+
+    @property
+    def procedure_has_steps(self) -> tuple[ProcedureHasStep, ...]:
+        """Return the procedure-membership relations in step order."""
+
+        return tuple(
+            relation
+            for relation in self._relations
+            if isinstance(relation, ProcedureHasStep)
         )
 
     def add_entity(self, entity: KGEntity) -> None:
@@ -198,7 +208,7 @@ class ProceduralKnowledgeGraph:
         dependent_relations = [
             relation
             for relation in self._relations
-            if not isinstance(relation, StepOrder)
+            if not isinstance(relation, (StepOrder, ProcedureHasStep))
             and self._references_identity(relation, step)
         ]
         dependent_parameters = self.process_parameters_by_action_id.get(action_id, [])
@@ -213,12 +223,17 @@ class ProceduralKnowledgeGraph:
 
         del self.steps_by_action_id[action_id]
         self._remove_identity(self._entities, step)
-        if dependent_policy == "cascade":
-            self._relations = [
-                relation
-                for relation in self._relations
-                if not self._references_identity(relation, step)
-            ]
+        self._relations = [
+            relation
+            for relation in self._relations
+            if not (
+                self._references_identity(relation, step)
+                and (
+                    dependent_policy == "cascade"
+                    or isinstance(relation, (StepOrder, ProcedureHasStep))
+                )
+            )
+        ]
 
         removed_parameters = self.process_parameters_by_action_id.pop(action_id, [])
         for parameter in removed_parameters:
