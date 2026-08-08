@@ -14,7 +14,11 @@ from backend.schemas.process_knowledge.entities import (
     Step,
     Worker,
 )
-from backend.schemas.process_knowledge.relations import PPERequirement, StepOrder
+from backend.schemas.process_knowledge.relations import (
+    PPERequirement,
+    ProcedureHasStep,
+    StepOrder,
+)
 from backend.schemas.process_knowledge.text import (
     Instruction,
     ObservedAction,
@@ -124,6 +128,9 @@ def test_pipeline_extracts_complete_editable_graph() -> None:
     ) == 1
     assert sum(
         isinstance(relation, PPERequirement) for relation in graph.relations
+    ) == 2
+    assert sum(
+        isinstance(relation, ProcedureHasStep) for relation in graph.relations
     ) == 2
     assert sum(isinstance(relation, StepOrder) for relation in graph.relations) == 1
     assert tuple(graph.process_parameters_by_action_id) == ("action-1",)

@@ -1,7 +1,7 @@
 """Build procedure and step sequencing entities from an instruction."""
 
 from backend.schemas.process_knowledge.entities import Procedure, Step
-from backend.schemas.process_knowledge.relations import StepOrder
+from backend.schemas.process_knowledge.relations import ProcedureHasStep, StepOrder
 from backend.schemas.process_knowledge.text import Instruction, ObservedAction
 
 
@@ -23,6 +23,10 @@ class Sequencer:
                 self.steps,
                 strict=True,
             )
+        )
+        self.procedure_has_steps = self._create_procedure_has_steps(
+            self.procedure,
+            self.steps,
         )
         self.step_orders = self._create_step_orders(self.steps)
 
@@ -55,4 +59,16 @@ class Sequencer:
         return [
             StepOrder(before=before, after=after)
             for before, after in zip(steps, steps[1:])
+        ]
+
+    @staticmethod
+    def _create_procedure_has_steps(
+        procedure: Procedure,
+        steps: list[Step],
+    ) -> list[ProcedureHasStep]:
+        """Connect the procedure to every step in procedural order."""
+
+        return [
+            ProcedureHasStep(procedure=procedure, step=step)
+            for step in steps
         ]

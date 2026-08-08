@@ -7,7 +7,10 @@ from backend.schemas.process_knowledge.entities import (
     Tool,
 )
 from backend.schemas.process_knowledge.pkg import ProceduralKnowledgeGraph
-from backend.schemas.process_knowledge.relations import ToolRequirement
+from backend.schemas.process_knowledge.relations import (
+    ProcedureHasStep,
+    ToolRequirement,
+)
 
 
 def make_graph() -> tuple[ProceduralKnowledgeGraph, list[Step]]:
@@ -63,6 +66,9 @@ def test_remove_step_cascades_relations_parameters_and_rebuilds_order() -> None:
     parameter = ProcessParameter(name="Force", parameter_type="force")
     graph.add_entity(tool)
     graph.add_entity(parameter)
+    graph.add_relation(
+        ProcedureHasStep(procedure=graph.procedure, step=steps[1])
+    )
     graph.add_relation(ToolRequirement(step=steps[1], tool=tool))
     graph.process_parameters_by_action_id["action-2"] = [parameter]
 
@@ -78,6 +84,10 @@ def test_remove_step_cascades_relations_parameters_and_rebuilds_order() -> None:
     assert all(entity is not parameter for entity in graph.entities)
     assert not any(
         isinstance(relation, ToolRequirement) for relation in graph.relations
+    )
+    assert not any(
+        isinstance(relation, ProcedureHasStep) and relation.step is removed
+        for relation in graph.relations
     )
 
 

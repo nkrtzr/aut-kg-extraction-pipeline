@@ -70,6 +70,12 @@ def test_sequencer_builds_procedure_steps_and_step_orders() -> None:
         (order.before.step_number, order.after.step_number)
         for order in sequencer.step_orders
     ] == [(1, 2), (2, 3)]
+    assert [
+        (relation.procedure, relation.step)
+        for relation in sequencer.procedure_has_steps
+    ] == [
+        (sequencer.procedure, step) for step in sequencer.steps
+    ]
 
 
 def test_sequencer_handles_instruction_without_actions() -> None:
@@ -83,4 +89,5 @@ def test_sequencer_handles_instruction_without_actions() -> None:
 
     assert sequencer.steps == []
     assert sequencer.steps_by_action_id == {}
+    assert sequencer.procedure_has_steps == []
     assert sequencer.step_orders == []
