@@ -1,7 +1,7 @@
 """In-memory aggregate for an extracted procedural knowledge graph."""
 
 from collections.abc import Iterable, Mapping
-from typing import Literal
+from typing import Literal, Self
 
 from pydantic import BaseModel
 
@@ -34,6 +34,36 @@ class ProceduralKnowledgeGraph:
         self.process_parameters_by_action_id: dict[
             ActionId, list[ProcessParameter]
         ] = {}
+
+    @classmethod
+    def from_results(
+        cls,
+        *,
+        entities: Iterable[KGEntity],
+        procedure: Procedure,
+        steps_by_action_id: Mapping[ActionId, Step],
+        process_parameters_by_action_id: Mapping[
+            ActionId, Iterable[ProcessParameter]
+        ]
+        | None = None,
+        relations: Iterable[KGRelation] = (),
+    ) -> Self:
+        """Assemble and validate a graph from completed extraction outputs.
+
+        The insertion order is centralized here: independent entities and
+        sequence endpoints are registered before parameters, and relations are
+        added only after all of their entity endpoints exist.
+        """
+
+        graph = cls()
+        graph.add_entities(entities)
+        graph.add_sequence(procedure, steps_by_action_id)
+        parameters_by_action = process_parameters_by_action_id or {}
+        for action_id, parameters in parameters_by_action.items():
+            graph.add_process_parameters(action_id, parameters)
+        graph.add_relations(relations)
+        graph.validate()
+        return graph
 
     @property
     def entities(self) -> tuple[KGEntity, ...]:

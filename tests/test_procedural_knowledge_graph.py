@@ -36,6 +36,27 @@ def test_graph_adds_sequence_and_builds_order_relations() -> None:
     graph.validate()
 
 
+def test_graph_assembles_completed_extraction_results() -> None:
+    procedure = Procedure(name="Procedure")
+    step = Step(name="Protect eyes")
+    tool = Tool(name="Safety glasses")
+    parameter = ProcessParameter(name="Duration", parameter_type="time")
+    relation = ToolRequirement(step=step, tool=tool, parameters=[parameter])
+
+    graph = ProceduralKnowledgeGraph.from_results(
+        entities=[tool],
+        procedure=procedure,
+        steps_by_action_id={"action-1": step},
+        process_parameters_by_action_id={"action-1": [parameter]},
+        relations=[relation],
+    )
+
+    assert graph.procedure is procedure
+    assert graph.steps == (step,)
+    assert relation in graph.relations
+    assert parameter in graph.entities
+
+
 def test_remove_step_cascades_relations_parameters_and_rebuilds_order() -> None:
     graph, steps = make_graph()
     tool = Tool(name="Clamp")
