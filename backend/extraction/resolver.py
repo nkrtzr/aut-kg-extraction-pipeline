@@ -210,6 +210,13 @@ class Resolver(ABC, Generic[EntityT, SourceT]):
 class ActorResolver(Resolver["ObservedActor", "Instruction"]):
     """Resolve actor references found in an instruction."""
 
+    def __init__(self, instruction: "Instruction | None" = None):
+        self._worker_bindings: tuple[tuple["ObservedActor", Worker], ...] = ()
+        super().__init__(instruction)
+
+    def _invalidate_derived_state(self) -> None:
+        self._worker_bindings = ()
+
     @property
     def entity_kind(self) -> str:
         return "actor"
@@ -229,7 +236,7 @@ class ActorResolver(Resolver["ObservedActor", "Instruction"]):
 
     def create_workers(
         self,
-        actors: list["ObservedActor"] | None = None,
+        actors: Sequence["ObservedActor"] | None = None,
         *,
         extractor: Extractor | None = None,
     ) -> list[Worker]:
@@ -240,6 +247,7 @@ class ActorResolver(Resolver["ObservedActor", "Instruction"]):
         if len(actor_names) != len(set(actor_names)):
             raise ValueError("Actors must be de-duplicated before creating workers")
         if not actor_names:
+            self._worker_bindings = ()
             return []
 
         worker_extractor = extractor or Extractor()
@@ -248,7 +256,11 @@ class ActorResolver(Resolver["ObservedActor", "Instruction"]):
             item_model=Worker,
             system_prompt=self._worker_creation_prompt(),
         )
-        return self._validate_workers(actor_names, workers)
+        validated_workers = self._validate_workers(actor_names, workers)
+        self._worker_bindings = tuple(
+            zip(candidates, validated_workers, strict=True)
+        )
+        return validated_workers
 
     def _worker_creation_prompt(self) -> str:
         return (
@@ -291,6 +303,14 @@ class ActorResolver(Resolver["ObservedActor", "Instruction"]):
         """Actor-specific alias for the generic entity collection."""
 
         return self.entities
+
+    @property
+    def worker_bindings(
+        self,
+    ) -> tuple[tuple["ObservedActor", Worker], ...]:
+        """Created workers paired with their reference-bearing observations."""
+
+        return self._worker_bindings
 
 
 class ObjectResolver(Resolver["ObservedObject", "Instruction"]):

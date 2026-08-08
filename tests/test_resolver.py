@@ -277,6 +277,10 @@ def test_object_resolver_semantically_deduplicates_objects() -> None:
 
 def test_actor_resolver_creates_enriched_workers_in_actor_order() -> None:
     resolver = ActorResolver()
+    actors = [
+        ObservedActor(id="actor-1", name="operator", action_ids=["action-1"]),
+        ObservedActor(id="actor-2", name="supervisor", action_ids=["action-2"]),
+    ]
     extractor = FakeExtractor(
         workers=[
             Worker(name="supervisor", role="supervisor"),
@@ -285,10 +289,7 @@ def test_actor_resolver_creates_enriched_workers_in_actor_order() -> None:
     )
 
     workers = resolver.create_workers(
-        [
-            ObservedActor(id="actor-1", name="operator"),
-            ObservedActor(id="actor-2", name="supervisor"),
-        ],
+        actors,
         extractor=extractor,
     )
 
@@ -296,6 +297,36 @@ def test_actor_resolver_creates_enriched_workers_in_actor_order() -> None:
         Worker(name="operator", role="operator"),
         Worker(name="supervisor", role="supervisor"),
     ]
+    assert resolver.worker_bindings == (
+        (actors[0], workers[0]),
+        (actors[1], workers[1]),
+    )
+
+
+def test_actor_resolver_invalidates_worker_bindings_when_actors_change() -> None:
+    resolver = ActorResolver()
+    operator = ObservedActor(id="actor-1", name="operator")
+    resolver.add(operator)
+    resolver.create_workers(
+        extractor=FakeExtractor(workers=[Worker(name="operator")])
+    )
+    assert resolver.worker_bindings
+
+    resolver.add(ObservedActor(id="actor-2", name="supervisor"))
+
+    assert resolver.worker_bindings == ()
+
+
+def test_actor_resolver_clears_worker_bindings_for_empty_creation() -> None:
+    resolver = ActorResolver()
+    operator = ObservedActor(id="actor-1", name="operator")
+    resolver.create_workers(
+        [operator],
+        extractor=FakeExtractor(workers=[Worker(name="operator")]),
+    )
+
+    assert resolver.create_workers([]) == []
+    assert resolver.worker_bindings == ()
 
 
 def test_actor_resolver_rejects_missing_workers() -> None:
