@@ -192,6 +192,12 @@ for adding a procedure, steps, general entities and relations, and action-bound
 process parameters. Its public entity, relation, step, and ordering collections
 are exposed as tuples.
 
+`ProceduralKnowledgeGraph.from_results(...)` is the assembly boundary for
+completed extraction outputs. It owns the required insertion order—independent
+entities, sequence entities, parameters, then relations—and validates the
+finished graph before returning it. The top-level extraction pipeline delegates
+assembly to this method rather than manipulating graph internals itself.
+
 Source action IDs are used as stable step identifiers because step numbers are
 positional and therefore change when a step is removed. Relation insertion
 checks that every referenced `KGEntity` is already registered in the graph.
@@ -236,6 +242,7 @@ Focused verification currently passes:
 - 19 tests across resolver, sequencer, refiner, and text-schema behavior;
 - 4 tests for graph assembly, reference validation, cascade removal, and
   restricted removal;
+- 1 test for assembling completed extraction outputs through `from_results()`;
 - 1 end-to-end façade test covering resolution through graph assembly;
 - Ruff checks for the changed implementation and test files.
 

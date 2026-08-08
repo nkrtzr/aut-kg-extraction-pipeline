@@ -35,12 +35,12 @@ class KnowledgeGraphExtractionPipeline:
             extractor=self.extractor,
         )
 
-        graph = ProceduralKnowledgeGraph()
-        graph.add_entities(workers)
-        graph.add_entities(physical_entities)
-        graph.add_sequence(sequencer.procedure, sequencer.steps_by_action_id)
-        for action_id, parameters in refiner.process_parameters_by_action_id.items():
-            graph.add_process_parameters(action_id, parameters)
-        graph.add_relations(refiner.relations)
-        graph.validate()
-        return graph
+        return ProceduralKnowledgeGraph.from_results(
+            entities=[*workers, *physical_entities],
+            procedure=sequencer.procedure,
+            steps_by_action_id=sequencer.steps_by_action_id,
+            process_parameters_by_action_id=(
+                refiner.process_parameters_by_action_id
+            ),
+            relations=refiner.relations,
+        )
