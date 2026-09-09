@@ -1,7 +1,7 @@
 from backend.extraction.refiner import (
-    ActionLevelThreeEntities,
+    ActionRefinement,
     Refiner,
-    SegmentLevelThreeEntities,
+    SegmentRefinement,
 )
 from backend.extraction.resolver import ClassifiedObject, ObjectResolver
 from backend.extraction.sequnecer import Sequencer
@@ -24,7 +24,7 @@ class FakeExtractor:
     def __init__(
         self,
         classified_objects: list[ClassifiedObject] | None = None,
-        segment_refinements: list[SegmentLevelThreeEntities] | None = None,
+        segment_refinements: list[SegmentRefinement] | None = None,
     ):
         self.classified_objects = classified_objects or []
         self.segment_refinements = iter(segment_refinements or [])
@@ -32,7 +32,7 @@ class FakeExtractor:
     def extract_list(self, **_kwargs: object) -> list[ClassifiedObject]:
         return self.classified_objects
 
-    def extract(self, **_kwargs: object) -> SegmentLevelThreeEntities:
+    def extract(self, **_kwargs: object) -> SegmentRefinement:
         return next(self.segment_refinements)
 
 
@@ -121,9 +121,9 @@ def test_refiner_links_entities_to_steps_by_action_reference() -> None:
         resolver,
         extractor=FakeExtractor(
             segment_refinements=[
-                SegmentLevelThreeEntities(
+                SegmentRefinement(
                     actions=[
-                        ActionLevelThreeEntities(
+                        ActionRefinement(
                             action_id="action-2",
                             process_parameters=[process_parameter],
                         ),
