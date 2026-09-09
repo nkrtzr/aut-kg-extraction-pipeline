@@ -165,6 +165,9 @@ available as `tool_requirements`, `material_requirements`, and
 The refiner then makes one structured LLM call per segment. The LLM receives
 the serialized segment, valid action IDs, and instruction metadata. It may
 return explicit `ProcessParameter` instances associated with action IDs.
+The intermediate response models are named `SegmentRefinement` and
+`ActionRefinement` to distinguish extraction transport structures from final
+knowledge-graph entities.
 
 Parameters are exposed through:
 

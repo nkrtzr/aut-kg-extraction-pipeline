@@ -24,17 +24,17 @@ from backend.schemas.process_knowledge.text import Segment
 LevelThreeRelation = ToolRequirement | MaterialRequirement | PPERequirement
 
 
-class ActionLevelThreeEntities(BaseModel):
-    """Level-three entities found in one action."""
+class ActionRefinement(BaseModel):
+    """Process parameters extracted for one observed action."""
 
     action_id: str
     process_parameters: list[ProcessParameter] = Field(default_factory=list)
 
 
-class SegmentLevelThreeEntities(BaseModel):
-    """Structured LLM result for one analyzed segment."""
+class SegmentRefinement(BaseModel):
+    """Structured refinement result for one analyzed segment."""
 
-    actions: list[ActionLevelThreeEntities] = Field(default_factory=list)
+    actions: list[ActionRefinement] = Field(default_factory=list)
 
 
 class Refiner:
@@ -112,7 +112,7 @@ class Refiner:
         for segment in self.sequencer.instruction.segments:
             refinement = extractor.extract(
                 text=segment.model_dump_json(),
-                response_model=SegmentLevelThreeEntities,
+                response_model=SegmentRefinement,
                 system_prompt=self._level_three_prompt(segment),
             )
             self._add_segment_refinement(segment, refinement)
@@ -124,7 +124,7 @@ class Refiner:
             "ProcessParameter entities. Associate every parameter with the "
             "exact action_id where it is stated. Return only "
             "action IDs from this list: "
-            f"{action_ids!r}. Omit actions with no level-three entities. "
+            f"{action_ids!r}. Omit actions with no process parameters. "
             "Do not infer values or units that are not supported by the "
             "segment. The surrounding instruction is "
             f"id={self.sequencer.instruction.id!r}, "
@@ -134,7 +134,7 @@ class Refiner:
     def _add_segment_refinement(
         self,
         segment: Segment,
-        refinement: SegmentLevelThreeEntities,
+        refinement: SegmentRefinement,
     ) -> None:
         valid_action_ids = {action.id for action in segment.actions}
         returned_action_ids = [

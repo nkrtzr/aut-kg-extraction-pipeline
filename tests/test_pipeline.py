@@ -3,8 +3,8 @@ from typing import Any
 
 from backend.extraction.pipeline import KnowledgeGraphExtractionPipeline
 from backend.extraction.refiner import (
-    ActionLevelThreeEntities,
-    SegmentLevelThreeEntities,
+    ActionRefinement,
+    SegmentRefinement,
 )
 from backend.extraction.resolver import ClassifiedObject, SemanticResolution
 from backend.schemas.process_knowledge.entities import (
@@ -41,10 +41,10 @@ class PipelineExtractor:
                     ]
                 }
             )
-        assert response_model is SegmentLevelThreeEntities
-        return SegmentLevelThreeEntities(
+        assert response_model is SegmentRefinement
+        return SegmentRefinement(
             actions=[
-                ActionLevelThreeEntities(
+                ActionRefinement(
                     action_id="action-1",
                     process_parameters=[
                         ProcessParameter(
