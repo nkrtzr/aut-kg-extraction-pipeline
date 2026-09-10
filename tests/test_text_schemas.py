@@ -230,3 +230,68 @@ def test_instruction_reference_maps_are_read_only() -> None:
             actor_id="actor-1",
             action="inspect",
         )
+def test_text_segment_accepts_action_without_timestamps() -> None:
+    action = ObservedAction(
+        id="action-1",
+        actor_id="actor-1",
+        action="inspect",
+        object_id="object-1",
+    )
+
+    segment = Segment(
+        id="segment-1",
+        scene="The worker inspects the component.",
+        actions=[action],
+        actors=[
+            ObservedActor(
+                id="actor-1",
+                name="worker",
+            )
+        ],
+        objects=[
+            ObservedObject(
+                id="object-1",
+                name="component",
+                object_type="part",
+            )
+        ],
+        uncertainties=[],
+    )
+
+    assert segment.actions[0].start_time_ms is None
+    assert segment.actions[0].end_time_ms is None
+
+
+def test_video_segment_rejects_action_without_timestamps() -> None:
+    action = ObservedAction(
+        id="action-1",
+        actor_id="actor-1",
+        action="inspect",
+        object_id="object-1",
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="Video actions must contain start and end timestamps",
+    ):
+        VideoSegment(
+            id="segment-1",
+            start_time_ms=0,
+            end_time_ms=1000,
+            scene="The worker inspects the component.",
+            actions=[action],
+            actors=[
+                ObservedActor(
+                    id="actor-1",
+                    name="worker",
+                )
+            ],
+            objects=[
+                ObservedObject(
+                    id="object-1",
+                    name="component",
+                    object_type="part",
+                )
+            ],
+            uncertainties=[],
+        )

@@ -14,15 +14,15 @@ SegmentId = NewType("SegmentId", str)
 
 
 class ObservedAction(BaseModel):
-    """An action observed during a bounded time interval.
+    """An action extracted from a text or video source.
 
     Actor and entity references use typed observation IDs. Display names are
-    never used as foreign keys.
+    never used as foreign keys. Timestamps are optional for text sources.
     """
 
     id: ActionId
-    start_time_ms: int
-    end_time_ms: int
+    start_time_ms: int | None = None
+    end_time_ms: int | None = None
 
     actor_id: ActorId
     action: str
@@ -98,6 +98,21 @@ class VideoSegment(Segment):
     actors: list[ObservedActor]
     objects: list[ObservedObject]
     uncertainties: list[str]
+
+    @model_validator(mode="after")
+    def require_action_timestamps(self) -> "VideoSegment":
+        """Require timestamps for every action in a video segment."""
+
+        for action in self.actions:
+            if (
+                action.start_time_ms is None
+                or action.end_time_ms is None
+            ):
+                raise ValueError(
+                    "Video actions must contain start and end timestamps"
+                )
+
+        return self
 
     @model_validator(mode="after")
     def number_repeated_entities(self) -> "VideoSegment":
