@@ -8,22 +8,29 @@ The repository now contains an in-memory pipeline that converts an
 ```text
 Instruction
     ├── ActorResolver ──> ObservedActor ──> Worker
+    ├── FeedbackResolver ──> feedback action IDs ──> StepFeedback
+    ├── QualificationResolver (optional) ────────> QualificationRecord
     ├── ObjectResolver ─> ObservedObject ─> Tool | Material | PPE
-    └── Sequencer ──────> Procedure + Step + StepOrder
-                                      │
-                                      ▼
-                                  Refiner
-                                      │
-                                      ├── ToolRequirement
-                                      ├── MaterialRequirement
-                                      ├── PPERequirement
-                                      └── ProcessParameter
+    └── Sequencer (excluding feedback) ─> Procedure + Step + StepOrder
+                                                 │
+                              ┌──────────────────┴──────────────────┐
+                              ▼                                     ▼
+                         Inspector                              Refiner
+                              │                                     │
+                     StepExecution + QualityCheck       requirements + parameters
+                              │
+                              ▼
+                  ProcedureExecutionAssembler
 ```
 
 The deterministic parts preserve observation order and action references.
 Semantic deduplication, entity enrichment, object classification, and process
 parameter extraction use the existing `Extractor` and its structured LLM
 responses.
+
+Feedback classification, inspection extraction, and qualification extraction
+also use structured LLM responses, but their deterministic assembly stages
+validate IDs and bind results only to resolved graph objects.
 
 ## Observation schemas and instruction indexing
 
@@ -243,6 +250,17 @@ the retained executions, the resolver creates `StepFeedback` relations linking
 each feedback item to its target `StepExecution` and reporting `Worker`.
 This avoids mistaking feedback reports for procedural steps.
 
+## Procedure-execution assembly
+
+File: `backend/extraction/executor.py`
+
+`ProcedureExecutionAssembler` deterministically creates one top-level
+`ProcedureExecution` for the instruction. It aggregates the procedure, unique
+step executors in first-execution order, step executions, quality checks, and
+step feedback. It leaves supervisor, absolute timestamps, overall status, and
+overall result unset because the current observation schema does not support
+them reliably.
+
 ## Procedural knowledge graph aggregate
 
 File: `backend/schemas/process_knowledge/pkg.py`
@@ -294,25 +312,22 @@ stages remain available for focused testing and advanced use, but callers no
 longer need to invoke them in the correct order or transfer their results into
 the graph manually.
 
-The returned graph is automatically populated with every output currently
-produced by those stages: `Worker`, `Tool`, `Material`, `PPE`, `Procedure`,
-`Step`, and `ProcessParameter` entities, plus `StepOrder`, `ToolRequirement`,
-`MaterialRequirement`, `PPERequirement`, and `ProcedureHasStep` relations.
+The returned graph is automatically populated with every schema class currently
+produced by the stages: `Worker`, `Tool`, `Material`, `PPE`, `Procedure`,
+`Step`, `ProcessParameter`, and `QualityRequirement` entities; and
+`StepOrder`, `ProcedureHasStep`, `ToolRequirement`, `MaterialRequirement`,
+`PPERequirement`, `StepExecution`, `QualityCheck`, `QualificationRecord`,
+`StepFeedback`, and `ProcedureExecution` relations.
 
 The LLM calls require the configured Ollama service unless an `Extractor`
 replacement is injected for testing.
 
 ## Verification
 
-Focused verification currently passes:
-
-- 19 tests across resolver, sequencer, refiner, and text-schema behavior;
-- 4 tests for graph assembly, reference validation, cascade removal, and
-  restricted removal;
-- 1 test for assembling completed extraction outputs through `from_results()`;
-- 1 end-to-end façade test confirming that all currently produced entity and
-  relation categories reach the assembled graph;
-- Ruff checks for the changed implementation and test files.
+The full suite currently passes 49 tests. It includes focused coverage for
+resolver, sequencer, refiner, graph assembly, inspector, qualification,
+feedback, procedure-execution aggregation, and end-to-end graph assembly.
+Ruff passes for the implementation and tests.
 
 The tests use injected fake extractors, so they verify prompts, structured
 response handling, validation, reference merging, ordering, classification,
@@ -328,5 +343,9 @@ and relation construction without requiring a running LLM.
 - Process parameters can currently be attached directly only to
   `ToolRequirement`, because the material and PPE requirement schemas have no
   parameter field.
-- Several current implementation and test files are untracked in Git and need
-  to be added before committing.
+- Feedback classification and quality-requirement extraction are conservative
+  LLM judgments; their real-model precision and recall need evaluation against
+  labelled observations.
+- Relative action timestamps cannot supply absolute execution times, and the
+  current observation schema does not establish procedure status, supervisors,
+  or overall acceptance results.

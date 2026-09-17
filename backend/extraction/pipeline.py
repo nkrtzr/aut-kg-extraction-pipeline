@@ -1,6 +1,7 @@
 """Top-level workflow for extracting a procedural knowledge graph."""
 
 from backend.extraction.extractor import Extractor
+from backend.extraction.executor import ProcedureExecutionAssembler
 from backend.extraction.feedback import FeedbackResolver
 from backend.extraction.inspector import Inspector
 from backend.extraction.qualifier import QualificationResolver
@@ -71,6 +72,12 @@ class KnowledgeGraphExtractionPipeline:
         step_feedback = feedback_resolver.create_step_feedback(
             inspector.executions_by_action_id,
         )
+        procedure_execution = ProcedureExecutionAssembler(
+            sequencer.procedure,
+            inspector.step_executions,
+            quality_checks=inspector.quality_checks,
+            feedback=step_feedback,
+        )
         refiner = Refiner(
             sequencer,
             object_resolver,
@@ -94,6 +101,7 @@ class KnowledgeGraphExtractionPipeline:
                 *inspector.step_executions,
                 *inspector.quality_checks,
                 *step_feedback,
+                procedure_execution.procedure_execution,
                 *(
                     qualification_resolver.qualification_records
                     if qualification_resolver is not None
