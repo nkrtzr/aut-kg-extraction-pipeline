@@ -80,6 +80,8 @@ class Refiner:
             for action_id in action_ids:
                 step = self.sequencer.steps_by_action_id.get(action_id)
                 if step is None:
+                    if action_id in self.sequencer.instruction.reference_index.actions_by_id:
+                        continue
                     raise ValueError(f"Object references unknown action {action_id!r}")
 
                 relation = self._requirement_for(step, entity)
@@ -118,7 +120,11 @@ class Refiner:
             self._add_segment_refinement(segment, refinement)
 
     def _level_three_prompt(self, segment: Segment) -> str:
-        action_ids = [action.id for action in segment.actions]
+        action_ids = [
+            action.id
+            for action in segment.actions
+            if action.id in self.sequencer.steps_by_action_id
+        ]
         return (
             "Analyze this industrial instruction segment and extract explicit "
             "ProcessParameter entities. Associate every parameter with the "
@@ -136,7 +142,11 @@ class Refiner:
         segment: Segment,
         refinement: SegmentRefinement,
     ) -> None:
-        valid_action_ids = {action.id for action in segment.actions}
+        valid_action_ids = {
+            action.id
+            for action in segment.actions
+            if action.id in self.sequencer.steps_by_action_id
+        }
         returned_action_ids = [
             action_entities.action_id for action_entities in refinement.actions
         ]

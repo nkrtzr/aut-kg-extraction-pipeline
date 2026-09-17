@@ -1,6 +1,7 @@
 """Top-level workflow for extracting a procedural knowledge graph."""
 
 from backend.extraction.extractor import Extractor
+from backend.extraction.feedback import FeedbackResolver
 from backend.extraction.inspector import Inspector
 from backend.extraction.qualifier import QualificationResolver
 from backend.extraction.refiner import Refiner
@@ -36,6 +37,12 @@ class KnowledgeGraphExtractionPipeline:
         actors = actor_resolver.semantic_deduplicate(extractor=self.extractor)
         workers = actor_resolver.create_workers(actors, extractor=self.extractor)
 
+        feedback_resolver = FeedbackResolver(
+            instruction,
+            actor_resolver.worker_bindings,
+            extractor=self.extractor,
+        )
+
         qualification_resolver = None
         if self.extract_qualifications:
             qualification_resolver = QualificationResolver(
@@ -52,11 +59,17 @@ class KnowledgeGraphExtractionPipeline:
             extractor=self.extractor,
         )
 
-        sequencer = Sequencer(instruction)
+        sequencer = Sequencer(
+            instruction,
+            excluded_action_ids=set(feedback_resolver.feedback_action_ids),
+        )
         inspector = Inspector(
             sequencer,
             actor_resolver.worker_bindings,
             extractor=self.extractor,
+        )
+        step_feedback = feedback_resolver.create_step_feedback(
+            inspector.executions_by_action_id,
         )
         refiner = Refiner(
             sequencer,
@@ -80,6 +93,7 @@ class KnowledgeGraphExtractionPipeline:
                 *refiner.relations,
                 *inspector.step_executions,
                 *inspector.quality_checks,
+                *step_feedback,
                 *(
                     qualification_resolver.qualification_records
                     if qualification_resolver is not None

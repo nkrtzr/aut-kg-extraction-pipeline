@@ -3,6 +3,7 @@ from typing import Any
 
 from backend.extraction.pipeline import KnowledgeGraphExtractionPipeline
 from backend.extraction.inspector import SegmentInspection
+from backend.extraction.feedback import SegmentFeedback
 from backend.extraction.qualifier import (
     ExtractedQualification,
     WorkerQualifications,
@@ -49,6 +50,8 @@ class PipelineExtractor:
             )
         if response_model is SegmentInspection:
             return SegmentInspection()
+        if response_model is SegmentFeedback:
+            return SegmentFeedback()
         if response_model is WorkerQualifications:
             return WorkerQualifications(
                 qualifications=[

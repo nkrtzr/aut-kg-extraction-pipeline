@@ -2,19 +2,33 @@
 
 from backend.schemas.process_knowledge.entities import Procedure, Step
 from backend.schemas.process_knowledge.relations import ProcedureHasStep, StepOrder
-from backend.schemas.process_knowledge.text import Instruction, ObservedAction
+from backend.schemas.process_knowledge.text import ActionId, Instruction, ObservedAction
 
 
 class Sequencer:
     """Convert an instruction's ordered actions into a procedure sequence."""
 
-    def __init__(self, instruction: Instruction):
+    def __init__(
+        self,
+        instruction: Instruction,
+        *,
+        excluded_action_ids: set[ActionId] | None = None,
+    ):
         self.instruction = instruction
+        excluded_action_ids = excluded_action_ids or set()
+        unknown_action_ids = excluded_action_ids - set(
+            instruction.reference_index.actions_by_id
+        )
+        if unknown_action_ids:
+            raise ValueError(
+                f"Cannot exclude unknown actions: {sorted(unknown_action_ids)!r}"
+            )
         self.procedure = self._create_procedure(instruction)
         self.actions = [
             action
             for segment in instruction.segments
             for action in segment.actions
+            if action.id not in excluded_action_ids
         ]
         self.steps = self._create_steps(self.actions)
         self.steps_by_action_id = dict(
