@@ -2,6 +2,7 @@
 
 from backend.extraction.extractor import Extractor
 from backend.extraction.inspector import Inspector
+from backend.extraction.qualifier import QualificationResolver
 from backend.extraction.refiner import Refiner
 from backend.extraction.resolver import ActorResolver, ObjectResolver
 from backend.extraction.sequnecer import Sequencer
@@ -12,8 +13,16 @@ from backend.schemas.process_knowledge.text import Instruction
 class KnowledgeGraphExtractionPipeline:
     """Coordinate all stages required to build a procedure specification KG."""
 
-    def __init__(self, *, extractor: Extractor | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        extractor: Extractor | None = None,
+        extract_qualifications: bool = False,
+        qualification_segments_per_worker: int | None = None,
+    ) -> None:
         self.extractor = extractor or Extractor()
+        self.extract_qualifications = extract_qualifications
+        self.qualification_segments_per_worker = qualification_segments_per_worker
 
     def extract(self, instruction: Instruction) -> ProceduralKnowledgeGraph:
         """Extract and assemble one complete editable specification graph.
@@ -26,6 +35,15 @@ class KnowledgeGraphExtractionPipeline:
         actor_resolver = ActorResolver(instruction)
         actors = actor_resolver.semantic_deduplicate(extractor=self.extractor)
         workers = actor_resolver.create_workers(actors, extractor=self.extractor)
+
+        qualification_resolver = None
+        if self.extract_qualifications:
+            qualification_resolver = QualificationResolver(
+                instruction,
+                actor_resolver.worker_bindings,
+                extractor=self.extractor,
+                segments_per_worker=self.qualification_segments_per_worker,
+            )
 
         object_resolver = ObjectResolver(instruction)
         objects = object_resolver.semantic_deduplicate(extractor=self.extractor)
@@ -62,5 +80,10 @@ class KnowledgeGraphExtractionPipeline:
                 *refiner.relations,
                 *inspector.step_executions,
                 *inspector.quality_checks,
+                *(
+                    qualification_resolver.qualification_records
+                    if qualification_resolver is not None
+                    else []
+                ),
             ],
         )

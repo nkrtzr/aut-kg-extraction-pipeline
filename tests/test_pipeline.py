@@ -3,6 +3,10 @@ from typing import Any
 
 from backend.extraction.pipeline import KnowledgeGraphExtractionPipeline
 from backend.extraction.inspector import SegmentInspection
+from backend.extraction.qualifier import (
+    ExtractedQualification,
+    WorkerQualifications,
+)
 from backend.extraction.refiner import (
     ActionRefinement,
     SegmentRefinement,
@@ -18,6 +22,7 @@ from backend.schemas.process_knowledge.entities import (
 from backend.schemas.process_knowledge.relations import (
     PPERequirement,
     ProcedureHasStep,
+    QualificationRecord,
     StepOrder,
 )
 from backend.schemas.process_knowledge.text import (
@@ -44,6 +49,15 @@ class PipelineExtractor:
             )
         if response_model is SegmentInspection:
             return SegmentInspection()
+        if response_model is WorkerQualifications:
+            return WorkerQualifications(
+                qualifications=[
+                    ExtractedQualification(
+                        expertise_level="skilled",
+                        procedure_domain="inspection",
+                    )
+                ]
+            )
         assert response_model is SegmentRefinement
         return SegmentRefinement(
             actions=[
@@ -138,3 +152,44 @@ def test_pipeline_extracts_complete_editable_graph() -> None:
     assert sum(isinstance(relation, StepOrder) for relation in graph.relations) == 1
     assert tuple(graph.process_parameters_by_action_id) == ("action-1",)
     graph.validate()
+
+
+def test_pipeline_optionally_extracts_worker_qualifications() -> None:
+    actor = ObservedActor(id="actor-1", name="operator")
+    instruction = Instruction(
+        id="instruction-1",
+        name="Inspect the assembly",
+        segments=[
+            Segment(
+                id="segment-1",
+                scene="workbench",
+                actions=[
+                    ObservedAction(
+                        id="action-1",
+                        start_time_ms=0,
+                        end_time_ms=1000,
+                        actor_id=actor.id,
+                        action="Inspect the assembly",
+                    )
+                ],
+                actors=[actor],
+                objects=[],
+                uncertainties=[],
+            )
+        ],
+    )
+
+    graph = KnowledgeGraphExtractionPipeline(
+        extractor=PipelineExtractor(),
+        extract_qualifications=True,
+        qualification_segments_per_worker=1,
+    ).extract(instruction)
+
+    records = [
+        relation
+        for relation in graph.relations
+        if isinstance(relation, QualificationRecord)
+    ]
+    assert len(records) == 1
+    assert records[0].worker.name == "operator"
+    assert records[0].procedure_domain == "inspection"
