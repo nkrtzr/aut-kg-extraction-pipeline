@@ -2,6 +2,7 @@ import json
 from typing import Any
 
 from backend.extraction.pipeline import KnowledgeGraphExtractionPipeline
+from backend.extraction.inspector import SegmentInspection
 from backend.extraction.refiner import (
     ActionRefinement,
     SegmentRefinement,
@@ -41,6 +42,8 @@ class PipelineExtractor:
                     ]
                 }
             )
+        if response_model is SegmentInspection:
+            return SegmentInspection()
         assert response_model is SegmentRefinement
         return SegmentRefinement(
             actions=[

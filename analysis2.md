@@ -185,6 +185,27 @@ The refiner rejects:
 - duplicate action IDs in one LLM refinement response;
 - action IDs outside the segment being analyzed.
 
+## Inspection and quality checks
+
+File: `backend/extraction/inspector.py`
+
+`Inspector` creates one `StepExecution` per retained observed action. It binds
+the execution to the resolved worker and retains the serialized action plus
+its observed duration. Relative millisecond timestamps are not converted to
+absolute datetimes.
+
+For every segment, the inspector asks the LLM for an `ActionInspection` only
+when a quality requirement or acceptance criterion is explicitly supported.
+Each result must refer to a unique action in that segment. The inspector then:
+
+- preserves the existing `Step` and marks it as `step_type="inspection"`;
+- registers the extracted `QualityRequirement` entity;
+- creates a `QualityCheck` bound to the execution, reporting worker, and
+  requirement.
+
+Actions without supported requirements still have normal `StepExecution`
+records and are not treated as quality checks.
+
 ## Procedural knowledge graph aggregate
 
 File: `backend/schemas/process_knowledge/pkg.py`
