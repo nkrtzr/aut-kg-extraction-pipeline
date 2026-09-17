@@ -140,6 +140,11 @@ procedure sequence:
 - creates one `ProcedureHasStep` relation for every generated step;
 - creates a `StepOrder` between every adjacent pair of steps.
 
+It accepts optional `excluded_action_ids`. This is used by `FeedbackResolver`
+so actions that are clearly reported feedback do not incorrectly become
+procedural steps, executions, requirements, or process-parameter targets.
+Excluded IDs must exist in the instruction.
+
 An instruction without actions produces empty step and ordering collections.
 
 Note: the filename is currently spelled `sequnecer.py`, matching the requested
@@ -175,8 +180,9 @@ Parameters are exposed through:
 - `process_parameters_by_action_id`.
 
 Parameters associated with an action using a tool are also assigned to the
-matching `ToolRequirement.parameters` field. Quality requirements are
-deliberately not extracted in this refinement step.
+matching `ToolRequirement.parameters` field. The refiner ignores object links
+to feedback actions excluded from sequencing and supplies only retained action
+IDs to its parameter-extraction prompt.
 
 The refiner rejects:
 
@@ -221,6 +227,21 @@ It returns only explicit `QualificationRecord` relations. The prompt prohibits
 inferring certifications or expertise from role labels or generic participation.
 `qualification_segments_per_worker` must be positive when set; `None` uses all
 relevant segments.
+
+## Step feedback
+
+File: `backend/extraction/feedback.py`
+
+`FeedbackResolver` runs before sequencing. For each segment, the LLM identifies
+only explicit question, issue, suggestion, or observation actions and maps each
+one to the retained procedural action it concerns. The resolver validates that
+the feedback source belongs to its segment, occurs only once, and targets an
+existing non-feedback action.
+
+Feedback action IDs are excluded from `Sequencer`. After `Inspector` has built
+the retained executions, the resolver creates `StepFeedback` relations linking
+each feedback item to its target `StepExecution` and reporting `Worker`.
+This avoids mistaking feedback reports for procedural steps.
 
 ## Procedural knowledge graph aggregate
 
