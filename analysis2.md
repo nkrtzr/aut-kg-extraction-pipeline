@@ -206,6 +206,22 @@ Each result must refer to a unique action in that segment. The inspector then:
 Actions without supported requirements still have normal `StepExecution`
 records and are not treated as quality checks.
 
+## Worker qualifications
+
+File: `backend/extraction/qualifier.py`
+
+`QualificationResolver` is an optional pipeline stage, enabled with
+`extract_qualifications=True`. It operates on existing resolved workers rather
+than creating or matching workers itself. For each worker it selects relevant
+segments in instruction order—optionally limited by
+`qualification_segments_per_worker`—and makes one worker-scoped structured
+LLM request.
+
+It returns only explicit `QualificationRecord` relations. The prompt prohibits
+inferring certifications or expertise from role labels or generic participation.
+`qualification_segments_per_worker` must be positive when set; `None` uses all
+relevant segments.
+
 ## Procedural knowledge graph aggregate
 
 File: `backend/schemas/process_knowledge/pkg.py`
