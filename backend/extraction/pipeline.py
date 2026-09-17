@@ -1,6 +1,7 @@
 """Top-level workflow for extracting a procedural knowledge graph."""
 
 from backend.extraction.extractor import Extractor
+from backend.extraction.inspector import Inspector
 from backend.extraction.refiner import Refiner
 from backend.extraction.resolver import ActorResolver, ObjectResolver
 from backend.extraction.sequnecer import Sequencer
@@ -34,6 +35,11 @@ class KnowledgeGraphExtractionPipeline:
         )
 
         sequencer = Sequencer(instruction)
+        inspector = Inspector(
+            sequencer,
+            actor_resolver.worker_bindings,
+            extractor=self.extractor,
+        )
         refiner = Refiner(
             sequencer,
             object_resolver,
@@ -41,11 +47,20 @@ class KnowledgeGraphExtractionPipeline:
         )
 
         return ProceduralKnowledgeGraph.from_results(
-            entities=[*workers, *physical_entities],
+            entities=[
+                *workers,
+                *physical_entities,
+                *inspector.quality_requirements,
+            ],
             procedure=sequencer.procedure,
             steps_by_action_id=sequencer.steps_by_action_id,
             process_parameters_by_action_id=(
                 refiner.process_parameters_by_action_id
             ),
-            relations=[*sequencer.procedure_has_steps, *refiner.relations],
+            relations=[
+                *sequencer.procedure_has_steps,
+                *refiner.relations,
+                *inspector.step_executions,
+                *inspector.quality_checks,
+            ],
         )
