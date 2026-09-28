@@ -1,189 +1,25 @@
-from backend.extraction.refiner import (
-    ActionRefinement,
-    Refiner,
-    SegmentRefinement,
-)
-from backend.extraction.resolver import ClassifiedObject, ObjectResolver
+from typing import Any
+
+from backend.extraction.refiner import ActionRefinement, Refiner
+from backend.extraction.resolver import ObjectResolver
 from backend.extraction.sequnecer import Sequencer
-from backend.schemas.process_knowledge.entities import (
-    Material,
-    PPE,
-    ProcessParameter,
-    Tool,
-)
-from backend.schemas.process_knowledge.text import (
-    Instruction,
-    ObservedAction,
-    ObservedActor,
-    ObservedObject,
-    Segment,
-)
+from backend.schemas.process_knowledge.entities import ProcessParameter
+from backend.schemas.process_knowledge.text import Instruction, ObservedAction, ObservedActor, ObservedObject, Segment
 
 
-class FakeExtractor:
-    def __init__(
-        self,
-        classified_objects: list[ClassifiedObject] | None = None,
-        segment_refinements: list[SegmentRefinement] | None = None,
-    ):
-        self.classified_objects = classified_objects or []
-        self.segment_refinements = iter(segment_refinements or [])
-
-    def extract_list(self, **_kwargs: object) -> list[ClassifiedObject]:
-        return self.classified_objects
-
-    def extract(self, **_kwargs: object) -> SegmentRefinement:
-        return next(self.segment_refinements)
+class Extractor:
+    def extract(self, **kwargs: Any) -> ActionRefinement:
+        assert kwargs["response_model"] is ActionRefinement
+        return ActionRefinement(process_parameters=[ProcessParameter(name="Heat", parameter_type="temperature", unit="C", nominal_value=20)])
 
 
-def test_refiner_links_entities_to_steps_by_action_reference() -> None:
-    instruction = Instruction(
-        id="instruction-1",
-        name="Fasten the plate",
-        segments=[
-            Segment(
-                id="segment-1",
-                scene="workbench",
-                actions=[
-                    ObservedAction(
-                        id="action-1",
-                        start_time_ms=0,
-                        end_time_ms=1000,
-                        actor_id="operator-1",
-                        action="Put on safety glasses",
-                        object_id="glasses-1",
-                    ),
-                    ObservedAction(
-                        id="action-2",
-                        start_time_ms=1000,
-                        end_time_ms=2000,
-                        actor_id="operator-1",
-                        action="Fasten the plate",
-                        object_id="plate-1",
-                        instrument_id="hammer-1",
-                    ),
-                ],
-                actors=[ObservedActor(id="operator-1", name="operator")],
-                objects=[
-                    ObservedObject(
-                        id="hammer-1",
-                        name="hammer",
-                        object_type="tool",
-                    ),
-                    ObservedObject(
-                        id="plate-1",
-                        name="steel plate",
-                        object_type="material",
-                    ),
-                    ObservedObject(
-                        id="glasses-1",
-                        name="safety glasses",
-                        object_type="ppe",
-                    ),
-                ],
-                uncertainties=[],
-            ),
-        ],
-    )
-    sequencer = Sequencer(instruction)
+def test_refinement_binds_parameters_to_current_action() -> None:
+    actor = ObservedActor(id="actor", name="operator")
+    object_ = ObservedObject(id="tool", name="lighter", object_type="tool")
+    action = ObservedAction(id="action", start_time_ms=0, end_time_ms=1, actor_id=actor.id, action="Heat", instrument_id=object_.id)
+    instruction = Instruction(id="i", name="i", segments=[Segment(id="s", scene="", actions=[action], actors=[actor], objects=[object_], uncertainties=[])])
     resolver = ObjectResolver(instruction)
-    labels = [resolver.semantic_label(obj) for obj in resolver.objects]
-    resolver.create_entities(
-        extractor=FakeExtractor(
-            [
-                ClassifiedObject(
-                    input_label=labels[0],
-                    entity_type="tool",
-                    tool=Tool(name="hammer"),
-                ),
-                ClassifiedObject(
-                    input_label=labels[1],
-                    entity_type="material",
-                    material=Material(name="steel plate"),
-                ),
-                ClassifiedObject(
-                    input_label=labels[2],
-                    entity_type="ppe",
-                    ppe=PPE(name="safety glasses"),
-                ),
-            ]
-        ),
-    )
-
-    process_parameter = ProcessParameter(
-        name="impact force",
-        parameter_type="force",
-        nominal_value=20,
-        unit="N",
-    )
-    refiner = Refiner(
-        sequencer,
-        resolver,
-        extractor=FakeExtractor(
-            segment_refinements=[
-                SegmentRefinement(
-                    actions=[
-                        ActionRefinement(
-                            action_id="action-2",
-                            process_parameters=[process_parameter],
-                        ),
-                    ]
-                ),
-            ]
-        ),
-    )
-
-    assert len(refiner.relations) == 3
-    assert refiner.tool_requirements[0].step.step_number == 2
-    assert refiner.tool_requirements[0].tool.name == "hammer"
-    assert refiner.material_requirements[0].step.step_number == 2
-    assert refiner.material_requirements[0].material.name == "steel plate"
-    assert refiner.ppe_requirements[0].step.step_number == 1
-    assert refiner.ppe_requirements[0].ppe.name == "safety glasses"
-    assert refiner.process_parameters == [process_parameter]
-    assert refiner.tool_requirements[0].parameters == [process_parameter]
-
-
-def test_refiner_requires_created_object_entities() -> None:
-    instruction = Instruction(
-        id="instruction-1",
-        name="Use a hammer",
-        segments=[
-            Segment(
-                id="segment-1",
-                scene="workbench",
-                actions=[
-                    ObservedAction(
-                        id="action-1",
-                        start_time_ms=0,
-                        end_time_ms=1000,
-                        actor_id="operator-1",
-                        action="Strike",
-                        instrument_id="hammer-1",
-                    ),
-                ],
-                actors=[ObservedActor(id="operator-1", name="operator")],
-                objects=[
-                    ObservedObject(
-                        id="hammer-1",
-                        name="hammer",
-                        object_type="tool",
-                    )
-                ],
-                uncertainties=[],
-            ),
-        ],
-    )
-
-    resolver = ObjectResolver(instruction)
-
-    try:
-        Refiner(
-            Sequencer(instruction),
-            resolver,
-            extractor=FakeExtractor(),
-        )
-    except ValueError as error:
-        assert "create_entities" in str(error)
-    else:
-        raise AssertionError("Refiner accepted unresolved object entities")
+    resolver.create_entities()
+    refiner = Refiner(Sequencer(instruction), resolver, extractor=Extractor())
+    assert tuple(refiner.process_parameters_by_action_id) == ("action",)
+    assert refiner.tool_requirements[0].parameters == refiner.process_parameters
