@@ -2,7 +2,7 @@
 
 from backend.extraction.extractor import Extractor
 from backend.extraction.executor import ProcedureExecutionAssembler
-from backend.extraction.feedback import FeedbackResolver
+from backend.extraction.feedback import FeedbackDiagnostic, FeedbackResolver
 from backend.extraction.inspector import Inspector
 from backend.extraction.qualifier import QualificationResolver
 from backend.extraction.refiner import Refiner
@@ -25,6 +25,7 @@ class KnowledgeGraphExtractionPipeline:
         self.extractor = extractor or Extractor()
         self.extract_qualifications = extract_qualifications
         self.qualification_segments_per_worker = qualification_segments_per_worker
+        self.feedback_diagnostics: tuple[FeedbackDiagnostic, ...] = ()
 
     def extract(self, instruction: Instruction) -> ProceduralKnowledgeGraph:
         """Extract and assemble one complete editable specification graph.
@@ -40,9 +41,9 @@ class KnowledgeGraphExtractionPipeline:
 
         feedback_resolver = FeedbackResolver(
             instruction,
-            actor_resolver.worker_bindings,
             extractor=self.extractor,
         )
+        self.feedback_diagnostics = feedback_resolver.diagnostics
 
         qualification_resolver = None
         if self.extract_qualifications:
@@ -69,14 +70,11 @@ class KnowledgeGraphExtractionPipeline:
             actor_resolver.worker_bindings,
             extractor=self.extractor,
         )
-        step_feedback = feedback_resolver.create_step_feedback(
-            inspector.executions_by_action_id,
-        )
         procedure_execution = ProcedureExecutionAssembler(
             sequencer.procedure,
             inspector.step_executions,
             quality_checks=inspector.quality_checks,
-            feedback=step_feedback,
+            feedback=[],
         )
         refiner = Refiner(
             sequencer,
@@ -100,7 +98,6 @@ class KnowledgeGraphExtractionPipeline:
                 *refiner.relations,
                 *inspector.step_executions,
                 *inspector.quality_checks,
-                *step_feedback,
                 procedure_execution.procedure_execution,
                 *(
                     qualification_resolver.qualification_records
