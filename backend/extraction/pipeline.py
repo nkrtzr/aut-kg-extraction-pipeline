@@ -35,8 +35,8 @@ class KnowledgeGraphExtractionPipeline:
         """
 
         actor_resolver = ActorResolver(instruction)
-        actors = actor_resolver.semantic_deduplicate(extractor=self.extractor)
-        workers = actor_resolver.create_workers(actors, extractor=self.extractor)
+        actors = list(actor_resolver.actors)
+        workers = actor_resolver.create_workers(actors)
 
         feedback_resolver = FeedbackResolver(
             instruction,
@@ -54,7 +54,7 @@ class KnowledgeGraphExtractionPipeline:
             )
 
         object_resolver = ObjectResolver(instruction)
-        objects = object_resolver.semantic_deduplicate(extractor=self.extractor)
+        objects = list(object_resolver.objects)
         physical_entities = object_resolver.create_entities(
             objects,
             extractor=self.extractor,
