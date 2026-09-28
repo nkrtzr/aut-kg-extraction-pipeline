@@ -3,7 +3,7 @@
 from collections import Counter
 from dataclasses import dataclass
 from types import MappingProxyType
-from typing import Mapping, NewType
+from typing import Any, Mapping, NewType, Sequence
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -174,6 +174,133 @@ class Instruction:
         )
         self.actors = MappingProxyType(
             {segment.id: tuple(segment.actors) for segment in segments}
+        )
+
+    @classmethod
+    def from_events(
+        cls,
+        events: Sequence[Mapping[str, Any]],
+        *,
+        actor_name: str = "operator",
+    ) -> tuple["Instruction", list[str]]:
+        """Build an instruction from the standard segmented video-event format.
+
+        The source format has no actor annotations, so each event receives one
+        placeholder actor. Object endpoint roles are not annotated either;
+        their source order maps to object, instrument, then target.
+        """
+
+        if not events:
+            raise ValueError("Expected a non-empty top-level JSON list.")
+
+        segments: list[VideoSegment] = []
+        conversion_warnings: list[str] = []
+
+        def seconds_to_ms(value: Any, *, fallback: int) -> int:
+            return fallback if value is None else round(float(value) * 1000)
+
+        for event in events:
+            event_id = str(event["event_id"])
+            start_ms = seconds_to_ms(event.get("start_sec"), fallback=0)
+            end_ms = seconds_to_ms(event.get("end_sec"), fallback=start_ms)
+            actor_id = ActorId(f"{event_id}:actor:1")
+            actor = ObservedActor(id=actor_id, name=actor_name)
+            observed_objects: list[ObservedObject] = []
+            object_id_by_key: dict[tuple[str, str], ObjectId] = {}
+            actions: list[ObservedAction] = []
+
+            for action_index, raw_action in enumerate(event.get("actions", []), start=1):
+                action_id = ActionId(f"{event_id}:action:{action_index}")
+                action_object_ids: list[ObjectId] = []
+                for raw_object in raw_action.get("objects", []):
+                    name = str(raw_object["name"])
+                    object_type = str(raw_object["type"])
+                    key = (name, object_type)
+                    object_id = object_id_by_key.get(key)
+                    if object_id is None:
+                        object_id = ObjectId(
+                            f"{event_id}:object:{len(observed_objects) + 1}"
+                        )
+                        object_id_by_key[key] = object_id
+                        observed_objects.append(
+                            ObservedObject(
+                                id=object_id,
+                                name=name,
+                                object_type=object_type,
+                            )
+                        )
+                    action_object_ids.append(object_id)
+
+                action_object_ids = list(dict.fromkeys(action_object_ids))
+                if len(action_object_ids) > 3:
+                    names_by_id = {obj.id: obj.name for obj in observed_objects}
+                    conversion_warnings.append(
+                        f"{action_id}: current ObservedAction schema can reference "
+                        "only 3 objects; not linked to the action: "
+                        f"{[names_by_id[obj_id] for obj_id in action_object_ids[3:]]}"
+                    )
+
+                action_start_ms = seconds_to_ms(
+                    raw_action.get("start_sec"), fallback=start_ms
+                )
+                action_end_ms = seconds_to_ms(
+                    raw_action.get("end_sec"), fallback=end_ms
+                )
+                actions.append(
+                    ObservedAction(
+                        id=action_id,
+                        start_time_ms=action_start_ms,
+                        end_time_ms=action_end_ms,
+                        actor_id=actor_id,
+                        action=str(raw_action["description"]),
+                        object_id=(action_object_ids[0] if action_object_ids else None),
+                        instrument_id=(
+                            action_object_ids[1]
+                            if len(action_object_ids) >= 2
+                            else None
+                        ),
+                        target_id=(
+                            action_object_ids[2]
+                            if len(action_object_ids) >= 3
+                            else None
+                        ),
+                    )
+                )
+
+            uncertainty = event.get("uncertainty") or {}
+            uncertainty_note = uncertainty.get("note", "")
+            uncertainties = [str(uncertainty_note)] if uncertainty_note else []
+            for warning in event.get("warnings", []):
+                warning_type = warning.get("type", "warning")
+                description = warning.get("description", "")
+                uncertainties.append(f"{warning_type}: {description}".strip())
+
+            segments.append(
+                VideoSegment(
+                    id=SegmentId(event_id),
+                    start_time_ms=start_ms,
+                    end_time_ms=end_ms,
+                    scene=str(event.get("step_description", event_id)),
+                    actions=actions,
+                    actors=[actor],
+                    objects=observed_objects,
+                    uncertainties=uncertainties,
+                )
+            )
+
+        video_ids = {
+            str(event["video_id"])
+            for event in events
+            if event.get("video_id") is not None
+        }
+        if len(video_ids) != 1:
+            raise ValueError(
+                f"Expected exactly one video_id for one Instruction, got {video_ids}"
+            )
+        instruction_id = next(iter(video_ids))
+        return (
+            cls(id=instruction_id, name=instruction_id, segments=segments),
+            conversion_warnings,
         )
 
     @staticmethod

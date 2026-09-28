@@ -108,6 +108,75 @@ def test_instruction_indexes_typed_references_and_reverse_references() -> None:
     assert index.object_action_ids["nail-1"] == ("action-1", "action-2")
 
 
+def test_instruction_builds_from_events() -> None:
+    instruction, warnings = Instruction.from_events(
+        [
+            {
+                "video_id": "wire-repair",
+                "event_id": "event-001",
+                "start_sec": 1.0,
+                "end_sec": 4.0,
+                "step_description": "Prepare wires",
+                "actions": [
+                    {
+                        "description": "Strip the wire.",
+                        "start_sec": 1.5,
+                        "end_sec": 3.5,
+                        "objects": [
+                            {"name": "stripper", "type": "tool"},
+                            {"name": "wire", "type": "material"},
+                        ],
+                    }
+                ],
+                "warnings": [{"type": "safety", "description": "Wear gloves."}],
+                "uncertainty": {"note": "Wire gauge unknown."},
+            }
+        ]
+    )
+
+    segment = instruction.segments[0]
+    action = segment.actions[0]
+    assert instruction.id == "wire-repair"
+    assert segment.start_time_ms == 1000
+    assert segment.end_time_ms == 4000
+    assert action.start_time_ms == 1500
+    assert action.end_time_ms == 3500
+    assert segment.actors[0].name == "operator"
+    assert action.object_id == "event-001:object:1"
+    assert action.instrument_id == "event-001:object:2"
+    assert segment.objects[0].action_ids == [action.id]
+    assert segment.uncertainties == ["Wire gauge unknown.", "safety: Wear gloves."]
+    assert warnings == []
+
+
+def test_instruction_ground_truth_reports_unlinked_fourth_object() -> None:
+    instruction, warnings = Instruction.from_events(
+        [
+            {
+                "video_id": "example",
+                "event_id": "event-001",
+                "actions": [
+                    {
+                        "description": "Assemble.",
+                        "objects": [
+                            {"name": "one", "type": "material"},
+                            {"name": "two", "type": "material"},
+                            {"name": "three", "type": "material"},
+                            {"name": "four", "type": "material"},
+                        ],
+                    }
+                ],
+            }
+        ]
+    )
+
+    assert len(instruction.segments[0].objects) == 4
+    assert warnings == [
+        "event-001:action:1: current ObservedAction schema can reference "
+        "only 3 objects; not linked to the action: ['four']"
+    ]
+
+
 def test_instruction_rejects_duplicate_segment_ids() -> None:
     segment = Segment(
         id="segment-1",
