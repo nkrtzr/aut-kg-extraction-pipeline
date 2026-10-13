@@ -16,11 +16,33 @@ class InspectionAssessment(BaseModel):
     """Quality-check assessment for the action supplied to the model."""
 
     is_quality_check: bool = False
-    requirement: QualityRequirement | None = None
+    requirement: "QualityRequirementAssessment | None" = None
     result: Literal["pass", "fail", "conditional", "not_inspected"] | None = None
     findings: str | None = None
     corrective_action_required: bool = False
     corrective_action_description: str | None = None
+
+
+class QualityRequirementAssessment(BaseModel):
+    """Optional LLM-supplied fields for a quality requirement.
+
+    A requirement is added to the graph only when its mandatory name is
+    explicitly supplied. This accepts incomplete model output without making
+    the extraction retry indefinitely.
+    """
+
+    name: str | None = None
+    requirement_type: Literal[
+        "dimensional",
+        "visual",
+        "destructive_test",
+        "non_destructive_test",
+        "documentation",
+        "traceability",
+    ] | None = None
+    acceptance_criteria: str | None = None
+    inspection_method: str | None = None
+    applicable_norm: str | None = None
 
 
 class Inspector:
@@ -66,8 +88,9 @@ class Inspector:
                 response_model=InspectionAssessment,
                 system_prompt=self._quality_check_prompt(action),
             )
-            if assessment.is_quality_check and assessment.requirement is not None:
-                self._add_inspection(action.id, assessment)
+            requirement = self._to_requirement(assessment.requirement)
+            if assessment.is_quality_check and requirement is not None:
+                self._add_inspection(action.id, assessment, requirement)
 
     @staticmethod
     def _quality_check_prompt(action: ObservedAction) -> str:
@@ -79,10 +102,20 @@ class Inspector:
             f"Current action text={action.action!r}."
         )
 
-    def _add_inspection(self, action_id: ActionId, assessment: InspectionAssessment) -> None:
-        requirement = assessment.requirement
-        if requirement is None:
-            return
+    @staticmethod
+    def _to_requirement(
+        assessment: QualityRequirementAssessment | None,
+    ) -> QualityRequirement | None:
+        if assessment is None or not assessment.name:
+            return None
+        return QualityRequirement(**assessment.model_dump())
+
+    def _add_inspection(
+        self,
+        action_id: ActionId,
+        assessment: InspectionAssessment,
+        requirement: QualityRequirement,
+    ) -> None:
         execution = self.executions_by_action_id[action_id]
         execution.step.step_type = "inspection"
         self.quality_requirements.append(requirement)
